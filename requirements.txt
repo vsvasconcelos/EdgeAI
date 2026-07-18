@@ -1,0 +1,32 @@
+# ============================================================
+# EdgeAI - Sistema Multi-Agente Local (Edge AI)
+# Dependências do ecossistema
+# Hardware alvo: 8GB RAM | NVIDIA MX110 2GB VRAM | Ubuntu Linux
+# Modelo: qwen2.5-coder:1.5b via Ollama (porta 11434)
+#
+# Estratégia: fixamos APENAS crewai e deixamos o pip resolver
+# as versões exatas de langchain e pydantic automaticamente,
+# evitando conflitos de dependências transitivas.
+# ============================================================
+
+# --- Framework de Orquestração de Agentes (versão fixada) ---
+crewai==0.11.2
+
+# --- LangChain Ecosystem (pip resolve versões compatíveis) ---
+langchain
+langchain-core
+langchain-community
+langchain-openai
+
+# --- OpenAI SDK (endpoint /v1 compatível com Ollama) ---
+openai
+
+# --- Utilitários e Infraestrutura ---
+requests>=2.31.0
+python-dotenv>=1.0.0
+rich>=13.7.0
+
+# --- Telemetria (requerida pelo crewai) ---
+opentelemetry-api>=1.24.0
+opentelemetry-sdk>=1.24.0
+opentelemetry-exporter-otlp-proto-http>=1.24.0

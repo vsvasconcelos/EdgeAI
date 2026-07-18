@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# Ollama local installation (contains binaries and heavy model files)
+ollama_install/
+*.log
+ollama.pid
+
+# Run history (individual timestamps in artifacts)
+artifacts/run_*/
+
+# IDE and local editor configurations
+.zed/
+.vscode/
+.idea/
+.DS_Store

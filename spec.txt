@@ -1,0 +1,41 @@
+Atue como um Engenheiro de Software Sênior especialista em Arquiteturas de Inteligência Artificial na Borda (Edge AI) e Sistemas Multi-Agentes Complexos. 
+
+[HISTÓRICO E ADAPTAÇÃO DA ARQUITETURA]:
+A concepção inicial deste sistema previa um fluxo agêntico não-linear com "loop dinâmico" executado pelo CrewAI. No entanto, devido às limitações do modelo de linguagem de pequeno porte utilizado (qwen2.5-coder:1.5b), a arquitetura teve de ser adaptada. Pequenos modelos locais falham de forma consistente com o protocolo ReAct (gerando loops sem fim, estouro de contexto/VRAM e erros de parseamento). Por essa razão, o sistema final foi implementado como um pipeline linear direto (GP -> Arquiteto -> Desenvolvedor) sem loops automatizados. 
+
+Abaixo constam as premissas originais planejadas e as adaptações realizadas na implementação prática:
+
+1. CONFIGURAÇÃO DE HARDWARE (ALVO):
+- Máquina: Notebook com 8 núcleos de CPU, 8 GB de RAM total (4.2 GB livres) e uma GPU dedicada NVIDIA GeForce MX110 com 2 GB de VRAM.
+- Sistema Operacional: Linux Ubuntu.
+
+2. ARQUITETURA DE INFERÊNCIA E RESTRIÇÃO DE MEMÓRIA (CRÍTICO):
+- Motor local: Ollama rodando localmente (porta 11434).
+- Modelo selecionado: qwen2.5-coder:1.5b (quantizado em INT4, formato GGUF).
+- Janela de Contexto Limite: O modelo opera em modo híbrido nativo pelo Ollama (33% CPU / 67% GPU) com uma janela de contexto travada em 4096 tokens para garantir a taxa de transferência ideal (~9.5 tokens/s).
+
+3. TOPOLOGIA DA TRIPULAÇÃO COM PROCESSO HIERÁRQUICO E LOOP DINÂMICO (CONCEPÇÃO INICIAL VS IMPLEMENTAÇÃO):
+*Concepção Inicial:* Um script Python utilizando o framework CrewAI configurando um fluxo hierárquico (`Process.hierarchical`) com:
+- Agente 1 (Gerente de Projetos - GP): Líder/Supervisor da tripulação (`manager_llm`).
+- Agente 2 (Arquiteto de Sistemas Líder): Desenha o fluxo lógico e classes (sem codificar).
+- Agente 3 (Desenvolvedor Python Especialista): Implementa o código e os testes inline.
+
+*Implementação Real (Pivô por Limitação do Modelo):*
+Devido a severas limitações de raciocínio lógico estruturado do modelo local `qwen2.5-coder:1.5b` (INT4/GGUF), a execução com o `AgentExecutor` do CrewAI gerou falhas sistemáticas (erros de parseamento no protocolo ReAct, loops repetitivos de até 27 minutos sem conclusão e consumo excessivo de KV Cache). O fluxo foi redesenhado para chamadas diretas sequenciais ao LLM (através de `llm.invoke()`), simulando as personas dos agentes de forma sequencial sem delegar de volta ou entrar em loop.
+
+4. LOGICA DO LOOP DINÂMICO DE REVISÃO (NÃO IMPLANTADA):
+*Planejado:* Se os testes unitários falhassem, o erro retornaria automaticamente ao GP, que delegaria de volta para o Arquiteto ou Desenvolvedor reabrirem o ciclo dinâmico de correção.
+*Histórico de Modificação:* Esse fluxo de loop dinâmico automático foi descartado devido ao risco crítico de *context bloat* (inchaço de contexto que esgotava a janela de 4096 tokens) e à incapacidade do modelo 1.5B de avaliar criticamente os erros de forma autônoma sem travar ou alucinar. A verificação final e o loop de correção foram movidos para a interação humana na interface da IDE Zed ou terminal.
+
+5. ESTRATÉGIA DE MITIGAÇÃO DO INCHAÇO DE CONTEXTO (PREVENÇÃO DE CRASH DE VRAM):
+Para mitigar o inchaço de contexto e evitar o travamento da máquina, o script final `app_agente.py` implementa:
+- Um pipeline linear sequencial que limpa e passa apenas os outputs resumidos de cada agente para o próximo (evitando carregar históricos de chat inteiros que estourariam o KV Cache de 4096 tokens).
+- Chamadas parametrizadas ao Ollama com limites rígidos de geração (`max_tokens=1500`) e temperatura baixa (`0.1`) para respostas previsíveis e assertivas.
+
+6. INTERFACE HOMEM-MÁQUINA (IDE ZED):
+Fornece a estrutura JSON necessária para criar uma 'Task' customizada dentro da IDE Zed (~/.config/zed/tasks.json). Essa task dispara o script Python dos agentes no terminal embutido alocando TTY, permitindo que o desenvolvedor humano envie o comando e assista à execução do pipeline dos agentes de forma offline.
+
+ENTREGÁVEIS FINAIS:
+- O arquivo 'requirements.txt' com as dependências do ecossistema.
+- O script Python 'app_agente.py' estruturado com o pipeline direto via LLM (sem ReAct e sem loops, garantindo estabilidade no hardware alvo).
+- O bloco JSON estruturado de configuração do 'zed_tasks.json' para a IDE Zed.

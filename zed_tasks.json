@@ -1,0 +1,69 @@
+[
+  {
+    "label": "🤖 EdgeAI — Executar Sistema Multi-Agente",
+    "command": "/home/vsvasconcelos/agents/EdgeAI/.venv/bin/python3",
+    "args": [
+      "/home/vsvasconcelos/agents/EdgeAI/app_agente.py"
+    ],
+    "cwd": "/home/vsvasconcelos/agents/EdgeAI",
+    "env": {
+      "PYTHONIOENCODING": "utf-8",
+      "PYTHONWARNINGS": "ignore::UserWarning"
+    },
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "🔍 EdgeAI — Verificar Ambiente",
+    "command": "bash",
+    "args": [
+      "-c",
+      "echo '=== Ollama ===' && ollama list && echo '' && echo '=== Python ===' && /home/vsvasconcelos/agents/EdgeAI/.venv/bin/python3 --version && echo '' && echo '=== CrewAI ===' && /home/vsvasconcelos/agents/EdgeAI/.venv/bin/pip show crewai | grep -E 'Name|Version' && echo '' && echo '=== Endpoint Ollama ===' && curl -s http://localhost:11434/api/tags | python3 -m json.tool | head -20"
+    ],
+    "cwd": "/home/vsvasconcelos/agents/EdgeAI",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "🚀 EdgeAI — Iniciar Ollama",
+    "command": "bash",
+    "args": [
+      "-c",
+      "echo 'Iniciando Ollama serve...' && ollama serve"
+    ],
+    "cwd": "/home/vsvasconcelos/agents/EdgeAI",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "⬇️ EdgeAI — Baixar Modelo qwen2.5-coder:1.5b",
+    "command": "ollama",
+    "args": [
+      "pull",
+      "qwen2.5-coder:1.5b"
+    ],
+    "cwd": "/home/vsvasconcelos/agents/EdgeAI",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "⚡ EdgeAI — Executar em Modo Batch",
+    "command": "bash",
+    "args": [
+      "-c",
+      "echo 'Desenvolva uma calculadora em Python com operações básicas.' | /home/vsvasconcelos/agents/EdgeAI/.venv/bin/python3 /home/vsvasconcelos/agents/EdgeAI/app_agente.py"
+    ],
+    "cwd": "/home/vsvasconcelos/agents/EdgeAI",
+    "env": {
+      "PYTHONIOENCODING": "utf-8",
+      "PYTHONWARNINGS": "ignore::UserWarning"
+    },
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  }
+]
