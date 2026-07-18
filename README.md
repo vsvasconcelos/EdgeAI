@@ -1,7 +1,7 @@
 # 🤖 EdgeAI — Sistema Multi-Agente Local
 ### Projeto desenvolvido para o curso: **I2A2 - Agentic AI: uma introdução**
 
-![tela](Tela. png)   
+![tela](Tela.png)   
 
 
 > **Pipeline multi-agente linear sequencial e servidor MCP otimizados para execução local em hardware Edge AI (Restrito/Low-End).**
@@ -37,15 +37,10 @@ O fluxo de trabalho foi estruturado como um pipeline linear direto. Cada etapa �
 
 ```mermaid
 graph TD
-    U["👤 Usuário"] -->|Pedido de Software| GP["🎯 Gerente de Projetos<br><b>(Define o Escopo)</b>"]
-    GP -->|Requisitos e Restrições| ARQ["🏗️ Arquiteto de Sistemas<br><b>(Design Técnico)</b>"]
-    ARQ -->|Estrutura e Assinaturas| DEV["💻 Desenvolvedor Python<br><b>(Código e Testes)</b>"]
-    DEV -->|Código Final + Testes Inline| R["📄 Gravação de Artefatos<br><b>(pasta artifacts/)</b>"]
-    
-    style GP fill:#ffd166,stroke:#333,stroke-width:2px;
-    style ARQ fill:#06d6a0,stroke:#333,stroke-width:2px;
-    style DEV fill:#118ab2,stroke:#333,stroke-width:2px;
-    style R fill:#ef476f,stroke:#333,stroke-width:2px;
+    U["👤 Usuário"] -->|Pedido de Software| GP["🎯 Gerente de Projetos (Define o Escopo)"]
+    GP -->|Requisitos e Restrições| ARQ["🏗️ Arquiteto de Sistemas (Design Técnico)"]
+    ARQ -->|Estrutura e Assinaturas| DEV["💻 Desenvolvedor Python (Código e Testes)"]
+    DEV -->|Código Final e Testes Inline| R["📄 Gravação de Artefatos (pasta artifacts/)"]
 ```
 
 ### Personas dos Agentes
