@@ -30,9 +30,11 @@ O **EdgeAI** é uma solução de engenharia de software projetada para rodar **s
 Adicionalmente, o projeto inclui um servidor **MCP (Model Context Protocol)** para integração direta como uma ferramenta (tool) na interface de chat do agente da IDE **Zed**.
 
 
-<div align="center">
-  <iframe width="560" height="315" src="https://www.youtube.com/embed/1Rb6H7dSKRw" title="vídeo" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
-</div>
+## Assista ao vídeo:
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/1Rb6H7dSKRw" title="Vídeo sobre o projeto" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+
+Este vídeo demonstra o uso do projeto.
 
 
 ---
