@@ -31,10 +31,7 @@ Adicionalmente, o projeto inclui um servidor **MCP (Model Context Protocol)** pa
 
 
 ## Assista ao vídeo:
-
-<iframe width="560" height="315" src="https://www.youtube.com/embed/1Rb6H7dSKRw" title="Vídeo sobre o projeto" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
-
-
+[![EdgeAI - Assistente de Código local](https://img.youtube.com/vi/1Rb6H7dSKRw/0.jpg)](https://www.youtube.com/watch?v=1Rb6H7dSKRw)
 Este vídeo demonstra o uso do projeto.
 
 
