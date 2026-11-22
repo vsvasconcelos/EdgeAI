@@ -31,6 +31,9 @@ O **EdgeAI** é uma solução de engenharia de software projetada para rodar **s
 
 Adicionalmente, o projeto inclui um servidor **MCP (Model Context Protocol)** para integração direta como uma ferramenta (tool) na interface de chat do agente da IDE **Zed**.
 
+### Versão com o LLM mais potente (`qwen2.5-coder:3b`)
+![Versão com o LLM mais potente](Tela2.png)
+
 
 ## Assista ao vídeo:
 [![EdgeAI - Assistente de Código local](https://img.youtube.com/vi/1Rb6H7dSKRw/0.jpg)](https://www.youtube.com/watch?v=1Rb6H7dSKRw)  
