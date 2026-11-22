@@ -13,22 +13,8 @@
     {
       "type": "wokwi-dht22",
       "id": "dht1",
-      "top": -120,
-      "left": -130,
-      "attrs": {}
-    },
-    {
-      "type": "wokwi-photoresistor-sensor",
-      "id": "ldr1",
-      "top": -120,
-      "left": 120,
-      "attrs": {}
-    },
-    {
-      "type": "wokwi-potentiometer",
-      "id": "pot1",
-      "top": -20,
-      "left": 160,
+      "top": -130,
+      "left": -140,
       "attrs": {}
     },
     {
@@ -41,73 +27,39 @@
       }
     },
     {
-      "type": "wokwi-led",
-      "id": "led_norm",
+      "type": "wokwi-rgb-led",
+      "id": "rgb1",
       "top": 40,
-      "left": -150,
-      "attrs": {
-        "color": "green"
-      }
-    },
-    {
-      "type": "wokwi-led",
-      "id": "led_lux",
-      "top": 40,
-      "left": -110,
-      "attrs": {
-        "color": "yellow"
-      }
-    },
-    {
-      "type": "wokwi-led",
-      "id": "led_alarm",
-      "top": 40,
-      "left": -70,
-      "attrs": {
-        "color": "red"
-      }
-    },
-    {
-      "type": "wokwi-resistor",
-      "id": "r1",
-      "top": 90,
-      "left": -150,
-      "attrs": {
-        "value": "220"
-      }
-    },
-    {
-      "type": "wokwi-resistor",
-      "id": "r2",
-      "top": 90,
-      "left": -110,
-      "attrs": {
-        "value": "220"
-      }
-    },
-    {
-      "type": "wokwi-resistor",
-      "id": "r3",
-      "top": 90,
-      "left": -70,
-      "attrs": {
-        "value": "220"
-      }
-    },
-    {
-      "type": "wokwi-servo",
-      "id": "servo1",
-      "top": 120,
       "left": 150,
-      "attrs": {}
+      "attrs": {
+        "common": "cathode"
+      }
     },
     {
-      "type": "wokwi-pushbutton",
-      "id": "btn1",
-      "top": -80,
-      "left": -40,
+      "type": "wokwi-resistor",
+      "id": "r_red",
+      "top": 110,
+      "left": 110,
       "attrs": {
-        "color": "blue"
+        "value": "220"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r_green",
+      "top": 110,
+      "left": 150,
+      "attrs": {
+        "value": "220"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r_blue",
+      "top": 110,
+      "left": 190,
+      "attrs": {
+        "value": "220"
       }
     }
   ],
@@ -131,42 +83,6 @@
       []
     ],
     [
-      "ldr1:VCC",
-      "pico:3V3",
-      "red",
-      []
-    ],
-    [
-      "ldr1:GND",
-      "pico:GND.2",
-      "black",
-      []
-    ],
-    [
-      "ldr1:AO",
-      "pico:GP26",
-      "orange",
-      []
-    ],
-    [
-      "pot1:VCC",
-      "pico:3V3",
-      "red",
-      []
-    ],
-    [
-      "pot1:GND",
-      "pico:GND.3",
-      "black",
-      []
-    ],
-    [
-      "pot1:SIG",
-      "pico:GP27",
-      "purple",
-      []
-    ],
-    [
       "oled1:VCC",
       "pico:3V3",
       "red",
@@ -174,7 +90,7 @@
     ],
     [
       "oled1:GND",
-      "pico:GND.4",
+      "pico:GND.2",
       "black",
       []
     ],
@@ -191,87 +107,45 @@
       []
     ],
     [
-      "pico:GP16",
-      "r1:1",
-      "green",
-      []
-    ],
-    [
-      "r1:2",
-      "led_norm:A",
-      "green",
-      []
-    ],
-    [
-      "led_norm:C",
-      "pico:GND.5",
+      "rgb1:COM",
+      "pico:GND.3",
       "black",
+      []
+    ],
+    [
+      "pico:GP16",
+      "r_red:1",
+      "red",
+      []
+    ],
+    [
+      "r_red:2",
+      "rgb1:R",
+      "red",
       []
     ],
     [
       "pico:GP17",
-      "r2:1",
-      "yellow",
+      "r_green:1",
+      "green",
       []
     ],
     [
-      "r2:2",
-      "led_lux:A",
-      "yellow",
-      []
-    ],
-    [
-      "led_lux:C",
-      "pico:GND.5",
-      "black",
+      "r_green:2",
+      "rgb1:G",
+      "green",
       []
     ],
     [
       "pico:GP18",
-      "r3:1",
-      "red",
-      []
-    ],
-    [
-      "r3:2",
-      "led_alarm:A",
-      "red",
-      []
-    ],
-    [
-      "led_alarm:C",
-      "pico:GND.5",
-      "black",
-      []
-    ],
-    [
-      "servo1:V+",
-      "pico:VBUS",
-      "red",
-      []
-    ],
-    [
-      "servo1:GND",
-      "pico:GND.6",
-      "black",
-      []
-    ],
-    [
-      "servo1:PWM",
-      "pico:GP13",
-      "orange",
-      []
-    ],
-    [
-      "btn1:1.l",
-      "pico:GP14",
+      "r_blue:1",
       "blue",
       []
     ],
     [
-      "btn1:2.r",
-      "pico:GND.7",
-      "black",
+      "r_blue:2",
+      "rgb1:B",
+      "blue",
       []
     ]
   ],

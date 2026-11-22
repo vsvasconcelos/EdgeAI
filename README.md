@@ -81,8 +81,8 @@ Ao submeter especificações complexas de sistemas embarcados IoT para a platafo
 
 **Solução Implementada na Fase 2:**
 *   **Upgrade para o modelo imediatamente superior (`qwen2.5-coder:3b`)**: Com ~1.9 GB (quantização `Q4_K_M`), o modelo de 3 bilhões de parâmetros cabe no orçamento de memória do hardware alvo (2 GB VRAM + offload híbrido em RAM) e apresenta fidelidade significativamente superior a restrições de API e estruturação de código. A versão `1.5b` foi desinstalada para liberar armazenamento local.
-*   **Roteamento Inteligente de Pipeline para Wokwi (`eh_pedido_wokwi`)**: O `app_agente.py` detecta automaticamente pedidos voltados ao Wokwi/MicroPython e aciona prompts especializados que exigem **exclusivamente** as APIs nativas do MicroPython (`from machine import Pin, ADC, PWM, I2C`, `import dht`, `import time`, `import json` e `from ssd1306 import SSD1306_I2C`), proibindo explicitamente bibliotecas `Adafruit_*`, `board` ou `wokwi_gpio`.
-*   **Empacotamento Completo de Artefatos Wokwi**: O `salvar_artefatos()` passou a gerar e validar automaticamente os arquivos prontos para simulação (`main.py`, `diagram.json` no schema oficial do Wokwi com `parts` e `connections`, driver `ssd1306.py` e `wokwi.toml`).
+*   **Detecção Dinâmica Multi-MCU e Multi-Linguagem (`detectar_perfil_projeto`)**: O `app_agente.py` identifica automaticamente a placa alvo (`Raspberry Pi Pico / Pico W`, `ESP32 / ESP32-S3 / ESP32-C3`, `Arduino Uno / Mega / Nano`, `STM32 Nucleo`) e a linguagem/SDK solicitada (`MicroPython`, `C/C++ Arduino (.ino)`, `C/C++ SDK Nativo (.c)`, `CircuitPython` ou `Python/C/C++ Desktop`).
+*   **Isolamento Estrito de Escopo e `diagram.json` Dinâmico (`construir_diagram_dinamico`)**: Os prompts e o gerador de circuito proíbem terminantemente adicionar periféricos não solicitados pelo usuário (eliminando qualquer circuito estático de fallback) e geram os artefatos específicos de cada stack (`main.py` + `ssd1306.py` + `firmware.uf2` para MicroPython, ou `sketch.ino` + `libraries.txt` para C/C++ Arduino/ESP32).
 
 ---
 

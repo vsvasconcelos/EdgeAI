@@ -115,23 +115,104 @@ def criar_llm(temperatura: float = 0.1, max_tokens: int = 2500) -> ChatOllama:
     )
 
 
-def eh_pedido_wokwi(pedido: str) -> bool:
-    """Detecta se o pedido do usuário é voltado para simulação Wokwi / MicroPython."""
+def detectar_perfil_projeto(pedido: str) -> dict:
+    """
+    Analisa o pedido do usuário e detecta dinamicamente:
+    - modo_wokwi: bool (se é simulação embarcada Wokwi)
+    - board_type: tipo do componente da placa no Wokwi (ex: wokwi-pi-pico, wokwi-esp32-devkit-v1, wokwi-arduino-uno)
+    - board_id  : id curto da placa no diagram.json (pico, esp, uno, mega, nano, stm32)
+    - board_nome: nome legível da placa
+    - linguagem : 'MicroPython', 'CircuitPython', 'C/C++ (Arduino)', 'C/C++ (SDK Nativo)' ou 'Python'
+    - arq_codigo: nome do arquivo principal ('main.py', 'sketch.ino', 'main.c', 'main.cpp', 'codigo.py')
+    - bloco_md  : tag do bloco markdown ('python', 'cpp', 'c')
+    """
     texto = pedido.lower()
-    palavras_chave = (
+
+    palavras_embarcado = (
         "wokwi",
         "micropython",
+        "circuitpython",
         "pi pico",
         "raspberry pi pico",
         "rp2040",
+        "esp32",
+        "esp-idf",
+        "arduino",
+        "atmega",
+        "stm32",
         "diagram.json",
         "ssd1306",
         "dht22",
-        "gp15",
-        "gp26",
-        "gp27",
+        "dht11",
+        "gpio",
+        "pinout",
+        "i2c",
+        "pwm",
     )
-    return any(k in texto for k in palavras_chave)
+    modo_wokwi = any(k in texto for k in palavras_embarcado)
+
+    # Detecção da placa / microcontrolador
+    if "esp32-s3" in texto or "esp32s3" in texto:
+        board_type, board_id, board_nome = "board-esp32-s3-devkitc-1", "esp", "ESP32-S3"
+    elif "esp32-c3" in texto or "esp32c3" in texto:
+        board_type, board_id, board_nome = "board-esp32-c3-devkitm-1", "esp", "ESP32-C3"
+    elif "esp32" in texto:
+        board_type, board_id, board_nome = "wokwi-esp32-devkit-v1", "esp", "ESP32"
+    elif "arduino mega" in texto or "mega 2560" in texto:
+        board_type, board_id, board_nome = "wokwi-arduino-mega", "mega", "Arduino Mega"
+    elif "arduino nano" in texto:
+        board_type, board_id, board_nome = "wokwi-arduino-nano", "nano", "Arduino Nano"
+    elif "arduino" in texto or "atmega328" in texto:
+        board_type, board_id, board_nome = "wokwi-arduino-uno", "uno", "Arduino Uno"
+    elif "stm32" in texto or "nucleo" in texto:
+        board_type, board_id, board_nome = "board-stm32-nucleo-c031c6", "stm32", "STM32 Nucleo"
+    elif "pico w" in texto or "wokwi-pi-pico-w" in texto:
+        board_type, board_id, board_nome = "wokwi-pi-pico-w", "pico", "Raspberry Pi Pico W"
+    else:
+        board_type, board_id, board_nome = "wokwi-pi-pico", "pico", "Raspberry Pi Pico (RP2040)"
+
+    # Detecção da linguagem / SDK
+    tem_cpp_arduino = any(
+        k in texto
+        for k in ("c++", "c/c++", ".ino", "sketch.ino", "arduino ide", "void setup", "void loop")
+    )
+    tem_c_sdk = any(k in texto for k in ("esp-idf", "pico-sdk", "linguagem c ", "em c puro", "main.c"))
+    tem_micropython = "micropython" in texto or "main.py" in texto
+    tem_circuitpython = "circuitpython" in texto
+
+    if modo_wokwi:
+        if tem_micropython:
+            linguagem, arq_codigo, bloco_md = "MicroPython", "main.py", "python"
+        elif tem_circuitpython:
+            linguagem, arq_codigo, bloco_md = "CircuitPython", "code.py", "python"
+        elif tem_c_sdk:
+            linguagem, arq_codigo, bloco_md = "C/C++ (SDK Nativo)", "main.c", "c"
+        elif tem_cpp_arduino or board_id in ("uno", "mega", "nano", "stm32") or (board_id == "esp" and not tem_micropython):
+            linguagem, arq_codigo, bloco_md = "C/C++ (Arduino)", "sketch.ino", "cpp"
+        else:
+            linguagem, arq_codigo, bloco_md = "MicroPython", "main.py", "python"
+    else:
+        if tem_cpp_arduino:
+            linguagem, arq_codigo, bloco_md = "C++", "main.cpp", "cpp"
+        elif tem_c_sdk:
+            linguagem, arq_codigo, bloco_md = "C", "main.c", "c"
+        else:
+            linguagem, arq_codigo, bloco_md = "Python", "codigo.py", "python"
+
+    return {
+        "modo_wokwi": modo_wokwi,
+        "board_type": board_type,
+        "board_id": board_id,
+        "board_nome": board_nome,
+        "linguagem": linguagem,
+        "arq_codigo": arq_codigo,
+        "bloco_md": bloco_md,
+    }
+
+
+def eh_pedido_wokwi(pedido: str) -> bool:
+    """Detecta se o pedido do usuário é voltado para simulação Wokwi / Sistemas Embarcados."""
+    return detectar_perfil_projeto(pedido)["modo_wokwi"]
 
 
 DRIVER_SSD1306_MICROPYTHON = '''"""Driver MicroPython I2C para display OLED SSD1306 (compatível com Wokwi)."""
@@ -219,58 +300,6 @@ class SSD1306_I2C(SSD1306):
 '''
 
 
-DIAGRAM_WOKWI_PADRAO_PICO = {
-    "version": 1,
-    "author": "EdgeAI",
-    "editor": "wokwi",
-    "parts": [
-        {"type": "wokwi-pi-pico", "id": "pico", "top": 0, "left": 0, "attrs": {}},
-        {"type": "wokwi-dht22", "id": "dht1", "top": -120, "left": -130, "attrs": {}},
-        {"type": "wokwi-photoresistor-sensor", "id": "ldr1", "top": -120, "left": 120, "attrs": {}},
-        {"type": "wokwi-potentiometer", "id": "pot1", "top": -20, "left": 160, "attrs": {}},
-        {"type": "board-ssd1306", "id": "oled1", "top": 120, "left": -160, "attrs": {"i2cAddress": "0x3c"}},
-        {"type": "wokwi-led", "id": "led_norm", "top": 40, "left": -150, "attrs": {"color": "green"}},
-        {"type": "wokwi-led", "id": "led_lux", "top": 40, "left": -110, "attrs": {"color": "yellow"}},
-        {"type": "wokwi-led", "id": "led_alarm", "top": 40, "left": -70, "attrs": {"color": "red"}},
-        {"type": "wokwi-resistor", "id": "r1", "top": 90, "left": -150, "attrs": {"value": "220"}},
-        {"type": "wokwi-resistor", "id": "r2", "top": 90, "left": -110, "attrs": {"value": "220"}},
-        {"type": "wokwi-resistor", "id": "r3", "top": 90, "left": -70, "attrs": {"value": "220"}},
-        {"type": "wokwi-servo", "id": "servo1", "top": 120, "left": 150, "attrs": {}},
-        {"type": "wokwi-pushbutton", "id": "btn1", "top": -80, "left": -40, "attrs": {"color": "blue"}},
-    ],
-    "connections": [
-        ["dht1:VCC", "pico:3V3", "red", []],
-        ["dht1:GND", "pico:GND.1", "black", []],
-        ["dht1:SDA", "pico:GP15", "green", []],
-        ["ldr1:VCC", "pico:3V3", "red", []],
-        ["ldr1:GND", "pico:GND.2", "black", []],
-        ["ldr1:AO", "pico:GP26", "orange", []],
-        ["pot1:VCC", "pico:3V3", "red", []],
-        ["pot1:GND", "pico:GND.3", "black", []],
-        ["pot1:SIG", "pico:GP27", "purple", []],
-        ["oled1:VCC", "pico:3V3", "red", []],
-        ["oled1:GND", "pico:GND.4", "black", []],
-        ["oled1:SDA", "pico:GP4", "blue", []],
-        ["oled1:SCL", "pico:GP5", "cyan", []],
-        ["pico:GP16", "r1:1", "green", []],
-        ["r1:2", "led_norm:A", "green", []],
-        ["led_norm:C", "pico:GND.5", "black", []],
-        ["pico:GP17", "r2:1", "yellow", []],
-        ["r2:2", "led_lux:A", "yellow", []],
-        ["led_lux:C", "pico:GND.5", "black", []],
-        ["pico:GP18", "r3:1", "red", []],
-        ["r3:2", "led_alarm:A", "red", []],
-        ["led_alarm:C", "pico:GND.5", "black", []],
-        ["servo1:V+", "pico:VBUS", "red", []],
-        ["servo1:GND", "pico:GND.6", "black", []],
-        ["servo1:PWM", "pico:GP13", "orange", []],
-        ["btn1:1.l", "pico:GP14", "blue", []],
-        ["btn1:2.r", "pico:GND.7", "black", []],
-    ],
-    "dependencies": {},
-}
-
-
 # =============================================================================
 #  AGENTES — CHAMADA DIRETA AO LLM
 # =============================================================================
@@ -323,82 +352,114 @@ def executar_agente(
 # =============================================================================
 
 def executar_pipeline_wokwi(llm: ChatOllama, pedido_usuario: str) -> tuple[str, str, str]:
-    """Pipeline especializado para projetos MicroPython no simulador Wokwi (Pi Pico)."""
+    """
+    Pipeline especializado para projetos embarcados no simulador Wokwi.
+    Suporta múltiplos microcontroladores (Pi Pico, ESP32, Arduino Uno/Mega/Nano, STM32)
+    e múltiplas linguagens (MicroPython, C/C++ Arduino, C/C++ SDK Nativo, CircuitPython).
+    """
+    perfil = detectar_perfil_projeto(pedido_usuario)
+    board_nome = perfil["board_nome"]
+    board_type = perfil["board_type"]
+    linguagem = perfil["linguagem"]
+    arq_codigo = perfil["arq_codigo"]
+    bloco_md = perfil["bloco_md"]
+
+    if linguagem == "MicroPython":
+        diretriz_sdk = (
+            "Linguagem: MicroPython nativo (`from machine import ...`, `import time`, `import json`). "
+            "Se houver DHT22/DHT11 use `import dht` com `.measure()`, `.temperature()` e `.humidity()`. "
+            "Se houver OLED SSD1306 use `from ssd1306 import SSD1306_I2C`. "
+            "Use temporização não-bloqueante com `time.ticks_ms()` e `time.ticks_diff()`. "
+            "PROIBIDO importar `Adafruit_*`, `board`, `digitalio` ou `wokwi_gpio`."
+        )
+    elif "Arduino" in linguagem:
+        diretriz_sdk = (
+            "Linguagem: C/C++ (Arduino Framework - `sketch.ino`). "
+            "Estruture com `#include` necessários, `void setup()` e `void loop()`. "
+            "Use temporização não-bloqueante com `unsigned long millis()` (evite `delay()` longo). "
+            "Use `Serial.begin(115200)` (ou `9600` no Uno) para telemetria serial."
+        )
+    else:
+        diretriz_sdk = (
+            f"Linguagem: {linguagem} (arquivo `{arq_codigo}`). "
+            "Escreva código limpo, modular e não-bloqueante respeitando os pinos da placa."
+        )
+
+    regra_isolamento = (
+        "REGRA DE OURO DE ISOLAMENTO DE ESCOPO: Inclua EXCLUSIVAMENTE os componentes, sensores, "
+        "atuadores e pinos solicitados no PEDIDO do usuário. É TERMINANTEMENTE PROIBIDO inventar ou "
+        "acrescentar servo motor, potenciômetro, LDR, botão ou qualquer outro periférico que NÃO "
+        "tenha sido pedido explicitamente pelo usuário."
+    )
+
     escopo = executar_agente(
         llm=llm,
-        nome_agente="Gerente de Projetos (Wokwi / Embarcados)",
+        nome_agente=f"Gerente de Projetos ({board_nome} / {linguagem})",
         icone="🎯",
         cor="yellow",
         system_prompt=(
-            "Você é um Gerente de Projetos Sênior de Sistemas Embarcados e IoT "
-            "especialista no simulador Wokwi com Raspberry Pi Pico (MicroPython). "
-            "Analise o pedido e produza um documento de escopo técnico fiel "
-            "preservando TODOS os pinos GPIO, periféricos, faixas de conversão e "
-            "requisitos de temporização. Sem comentários extras."
+            f"Você é um Gerente de Projetos Sênior de Sistemas Embarcados especialista no simulador Wokwi "
+            f"com a placa {board_nome} (`{board_type}`) utilizando {linguagem}. "
+            f"{regra_isolamento} "
+            f"Analise o pedido e produza um documento de escopo técnico fiel. Sem comentários extras."
         ),
         user_prompt=(
-            f"Analise o pedido abaixo para a plataforma Wokwi (Raspberry Pi Pico / MicroPython) "
+            f"Analise o pedido abaixo para a plataforma Wokwi ({board_nome} / {linguagem}) "
             f"e produza um Documento de Escopo objetivo:\n\n"
             f"PEDIDO:\n{pedido_usuario}\n\n"
             f"Entregue:\n"
-            f"1. Mapa de Hardware e Pinagem exata no wokwi-pi-pico (GP4, GP5, GP13, GP14, GP15, GP16, GP17, GP18, GP26, GP27)\n"
-            f"2. Requisitos Funcionais (amostragem, conversões ADC 0-65535, controle proporcional do Servo, PWM do LED, telas do OLED, IRQ do botão e telemetria JSON via Serial)\n"
-            f"3. Critérios de Aceitação e Tratamento de Falhas (OSError no DHT22)\n"
-            f"4. Restrições de Plataforma: MicroPython nativo (`machine`, `dht`, `time`, `json`, `ssd1306`). "
-            f"PROIBIDO usar `Adafruit_DHT`, `board`, `digitalio` ou `wokwi_gpio`."
+            f"1. Placa alvo (`{board_type}`) e Mapa de Hardware contendo SOMENTE os componentes e pinos solicitados no pedido\n"
+            f"2. Requisitos Funcionais detalhados (intervalos de leitura, lógica de acionamento, interface/display e telemetria serial se aplicável)\n"
+            f"3. Requisitos Não Funcionais e Tratamento de Falhas\n"
+            f"4. Restrições de Plataforma: {diretriz_sdk}"
         ),
     )
 
     arquitetura = executar_agente(
         llm=llm,
-        nome_agente="Arquiteto de Sistemas (MicroPython / Wokwi)",
+        nome_agente=f"Arquiteto de Sistemas ({board_nome} / {linguagem})",
         icone="🏗️",
         cor="blue",
         system_prompt=(
-            "Você é um Arquiteto de Firmware MicroPython Sênior para Raspberry Pi Pico no Wokwi. "
-            "Sua função é definir APENAS a especificação técnica e as assinaturas das funções. "
-            "NÃO implemente o código completo. "
-            "Use EXCLUSIVAMENTE as APIs reais do MicroPython:\n"
-            "- `from machine import Pin, ADC, PWM, I2C`\n"
-            "- `import dht`, `import time`, `import json`\n"
-            "- `from ssd1306 import SSD1306_I2C`\n"
-            "NUNCA mencione `Adafruit_*`, `board`, `digitalio` ou `wokwi_gpio`."
+            f"Você é um Arquiteto de Firmware Sênior para {board_nome} (`{board_type}`) em {linguagem} no Wokwi. "
+            f"Sua função é definir APENAS a especificação técnica e as assinaturas das funções para `{arq_codigo}`. "
+            f"NÃO implemente o código final completo nesta etapa. "
+            f"{regra_isolamento}\n"
+            f"{diretriz_sdk}"
         ),
         user_prompt=(
-            f"Com base no escopo abaixo, especifique a arquitetura técnica MicroPython para o Wokwi.\n\n"
+            f"Com base no escopo abaixo, especifique a arquitetura técnica em {linguagem} para {board_nome} no Wokwi.\n\n"
             f"=== ESCOPO ===\n{escopo}\n\n"
-            f"Liste de forma concisa (máximo 180 palavras, SEM implementar o código final):\n"
-            f"1. Mapeamento de objetos MicroPython (`dht.DHT22(Pin(15))`, `ADC(Pin(26))`, `ADC(Pin(27))`, `I2C(0, sda=Pin(4), scl=Pin(5))`, `SSD1306_I2C(128, 64, i2c)`, `Pin(16, Pin.OUT)`, `PWM(Pin(17))`, `Pin(18, Pin.OUT)`, `PWM(Pin(13))`, `Pin(14, Pin.IN, Pin.PULL_UP)` com `.irq()`)\n"
-            f"2. Assinaturas das funções e fórmulas de conversão (ADC `read_u16()` 0..65535 -> % luminosidade e Setpoint 15..40°C, pulso PWM do servo via `duty_u16`)\n"
-            f"3. Fluxo do loop principal não-bloqueante (`time.ticks_ms()` / `time.ticks_diff()`)."
+            f"Liste de forma concisa (máximo 180 palavras, SEM implementar o código completo):\n"
+            f"1. Inicialização APENAS dos periféricos e pinos presentes no escopo (NÃO adicione servo, ADC ou botões se não estiverem no escopo)\n"
+            f"2. Assinaturas das funções e regras exatas de negócio/prioridade definidas no escopo\n"
+            f"3. Estrutura do loop principal não-bloqueante respeitando os intervalos em milissegundos do escopo."
         ),
     )
 
     codigo = executar_agente(
         llm=llm,
-        nome_agente="Desenvolvedor MicroPython (Wokwi)",
+        nome_agente=f"Desenvolvedor Embarcado ({board_nome} / {linguagem})",
         icone="💻",
         cor="green",
         system_prompt=(
-            "Você é um Desenvolvedor Especialista em MicroPython para Raspberry Pi Pico no simulador Wokwi. "
-            "Sua tarefa é escrever o código Python completo do arquivo `main.py` dentro de um único bloco ```python ... ```. "
-            "REGRAS OBRIGATÓRIAS:\n"
-            "1. Inicie com: `from machine import Pin, ADC, PWM, I2C`, `import dht`, `import time`, `import json` e `from ssd1306 import SSD1306_I2C`.\n"
-            "2. PROIBIDO importar `Adafruit_DHT`, `Adafruit_SSD1306`, `Adafruit_ADS1x15`, `board`, `digitalio`, `analogio` ou `wokwi_gpio`.\n"
-            "3. Configure `servo = PWM(Pin(13)); servo.freq(50)` e `led_amarelo = PWM(Pin(17)); led_amarelo.freq(1000)`.\n"
-            "4. No módulo `dht` do MicroPython, `dht_sensor.temperature()` e `dht_sensor.humidity()` são MÉTODOS — SEMPRE chame com parênteses `()`.\n"
-            "5. Inicialize `temperature = 25.0`, `humidity = 50.0` e `setpoint = 25.0` antes do `while True:` e trate `try ... except OSError:` no DHT22 exibindo `ERRO DHT22` no OLED e ligando `led_vermelho.value(1)`."
+            f"Você é um Desenvolvedor Sênior de Sistemas Embarcados para {board_nome} (`{board_type}`) em {linguagem} no Wokwi. "
+            f"Sua tarefa é escrever:\n"
+            f"1) O código completo do arquivo `{arq_codigo}` dentro de um único bloco ```{bloco_md} ... ```.\n"
+            f"2) Em seguida, o arquivo `diagram.json` válido do Wokwi dentro de um bloco ```json ... ```.\n"
+            f"{regra_isolamento}\n"
+            f"{diretriz_sdk}"
         ),
         user_prompt=(
-            f"Escreva agora o código MicroPython COMPLETO do arquivo `main.py` para o Raspberry Pi Pico no Wokwi "
-            f"com base na arquitetura abaixo:\n\n"
-            f"=== ESCOPO ===\n{escopo}\n\n"
+            f"Escreva agora o código COMPLETO de `{arq_codigo}` em {linguagem} para {board_nome} (`{board_type}`) "
+            f"e o `diagram.json` correspondente no Wokwi, seguindo rigorosamente o pedido e a arquitetura abaixo:\n\n"
+            f"=== PEDIDO ORIGINAL ===\n{pedido_usuario}\n\n"
             f"=== ARQUITETURA ===\n{arquitetura}\n\n"
-            f"Entregue o código completo de `main.py` dentro de um bloco ```python ... ``` contendo:\n"
-            f"- Inicialização dos pinos GP4, GP5, GP13, GP14, GP15, GP16, GP17, GP18, GP26, GP27\n"
-            f"- `dht_sensor.measure()`, `dht_sensor.temperature()` e `dht_sensor.humidity()` com parênteses `()`\n"
-            f"- Interrupção IRQ no botão GP14 (`button.irq(trigger=Pin.IRQ_FALLING, handler=...)`) com debounce (`time.ticks_ms()`) para alternar `tela_atual` entre 0 (Operação) e 1 (Diagnóstico)\n"
-            f"- Leitura de sensores, controle proporcional do Servo (passando `temperature` e `setpoint`), controle de LEDs (`led_verde`, `led_amarelo.duty_u16(...)`, `led_vermelho`), atualização do OLED SSD1306 e `print(json.dumps(...))`."
+            f"REGRAS OBRIGATÓRIAS:\n"
+            f"- Implemente SOMENTE os componentes e pinos do pedido (NÃO adicione servo, LDR, potenciômetro ou botão se não foram pedidos).\n"
+            f"- Respeite exatamente os textos de display, limiares de temperatura/umidade, cores de LED e formato JSON serial especificados.\n"
+            f"- Entregue primeiro o bloco ```{bloco_md} ... ``` com o código completo de `{arq_codigo}`.\n"
+            f"- Depois entregue o bloco ```json ... ``` com o `diagram.json` no formato oficial Wokwi (`\"version\": 1, \"author\": \"EdgeAI\", \"editor\": \"wokwi\", \"parts\": [...], \"connections\": [...]`)."
         ),
     )
     return escopo, arquitetura, codigo
@@ -598,59 +659,259 @@ def gerar_firmware_uf2_wokwi(codigo_main: str, codigo_ssd1306: str, destino_uf2:
         return False
 
 
-def extrair_diagram_json(escopo: str, arquitetura: str, codigo: str) -> dict:
+def extrair_libraries_txt(codigo: str) -> str:
+    """Detecta headers C/C++ (#include) e gera o conteúdo de libraries.txt para o Wokwi."""
+    mapa_libs = {
+        "DHT.h": ["DHT sensor library", "Adafruit Unified Sensor"],
+        "DHTesp.h": ["DHT sensor library for ESPx"],
+        "Adafruit_SSD1306.h": ["Adafruit SSD1306", "Adafruit GFX Library"],
+        "U8g2lib.h": ["U8g2"],
+        "LiquidCrystal_I2C.h": ["LiquidCrystal I2C"],
+        "ESP32Servo.h": ["ESP32Servo"],
+        "Servo.h": ["Servo"],
+        "OneWire.h": ["OneWire"],
+        "DallasTemperature.h": ["DallasTemperature"],
+        "ArduinoJson.h": ["ArduinoJson"],
+        "PubSubClient.h": ["PubSubClient"],
+    }
+    libs = []
+    for header, nomes in mapa_libs.items():
+        if header.lower() in codigo.lower():
+            for n in nomes:
+                if n not in libs:
+                    libs.append(n)
+    return "\n".join(libs) + ("\n" if libs else "")
+
+
+def construir_diagram_dinamico(
+    pedido_usuario: str, escopo: str, arquitetura: str, codigo: str, perfil: dict
+) -> dict:
     """
-    Tenta extrair um diagram.json válido no schema Wokwi (version, parts, connections)
-    a partir das saídas dos agentes; caso o JSON gerado não contenha 'parts' e 'connections'
-    no formato oficial do Wokwi, retorna o DIAGRAM_WOKWI_PADRAO_PICO homologado.
+    Constrói ou valida o diagram.json de forma 100% dinâmica com base APENAS nos
+    componentes solicitados no pedido do usuário e na placa selecionada.
+    Nunca adiciona componentes que não foram solicitados no pedido.
     """
+    board_type = perfil["board_type"]
+    board_id = perfil["board_id"]
+    texto_pedido = (pedido_usuario if pedido_usuario.strip() else f"{escopo}\n{codigo}").lower()
+
+    # 1. Tenta aproveitar JSON gerado pelo LLM se já estiver 100% no schema Wokwi
     padrao_json = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
-    for texto in (codigo, arquitetura, escopo):
-        for match in padrao_json.findall(texto):
+    for fonte in (codigo, arquitetura, escopo):
+        for match in padrao_json.findall(fonte):
             try:
                 obj = json.loads(match)
                 if (
                     isinstance(obj, dict)
-                    and "version" in obj
                     and isinstance(obj.get("parts"), list)
                     and isinstance(obj.get("connections"), list)
                     and obj["parts"]
+                    and obj["connections"]
                     and isinstance(obj["parts"][0], dict)
+                    and "type" in obj["parts"][0]
                     and "id" in obj["parts"][0]
+                    and isinstance(obj["connections"][0], list)
+                    and len(obj["connections"][0]) >= 2
                 ):
+                    for idx, p in enumerate(obj["parts"]):
+                        p.setdefault("top", 0 if idx == 0 else -120 + (idx * 65))
+                        p.setdefault("left", 0 if idx == 0 else (-160 if idx % 2 == 1 else 160))
+                        p.setdefault("attrs", {})
+                    obj.setdefault("version", 1)
+                    obj.setdefault("author", "EdgeAI")
+                    obj.setdefault("editor", "wokwi")
+                    obj.setdefault("dependencies", {})
                     return obj
             except Exception:
                 continue
-    return DIAGRAM_WOKWI_PADRAO_PICO
+
+    return _montar_partes_dinamicas(texto_pedido, board_type, board_id)
+
+
+def _montar_partes_dinamicas(texto_pedido: str, board_type: str, board_id: str) -> dict:
+    """Monta parts e connections no schema oficial do Wokwi apenas para os componentes do pedido."""
+    parts = [{"type": board_type, "id": board_id, "top": 0, "left": 0, "attrs": {}}]
+    connections = []
+
+    if board_id == "pico":
+        vcc_pin = f"{board_id}:3V3"
+        gnd_pins = [f"{board_id}:GND.{i}" for i in range(1, 8)]
+        sda_default, scl_default = "GP4", "GP5"
+    elif board_id == "esp":
+        vcc_pin = f"{board_id}:3V3"
+        gnd_pins = [f"{board_id}:GND.1", f"{board_id}:GND.2", f"{board_id}:GND.3"]
+        sda_default, scl_default = "21", "22"
+    else:
+        vcc_pin = f"{board_id}:5V"
+        gnd_pins = [f"{board_id}:GND.1", f"{board_id}:GND.2", f"{board_id}:GND.3"]
+        sda_default, scl_default = "A4", "A5"
+
+    gnd_idx = 0
+
+    def proximo_gnd() -> str:
+        nonlocal gnd_idx
+        p = gnd_pins[gnd_idx % len(gnd_pins)]
+        gnd_idx += 1
+        return p
+
+    # DHT22 / DHT11
+    if "dht22" in texto_pedido or "dht11" in texto_pedido:
+        dht_type = "wokwi-dht22" if "dht22" in texto_pedido else "wokwi-dht11"
+        m_dht = re.search(r"dht.*?(gp\d+|d\d+|\b\d+\b)", texto_pedido)
+        pino_dht = m_dht.group(1).upper() if m_dht else ("GP15" if board_id == "pico" else "4")
+        if board_id == "pico" and pino_dht.isdigit():
+            pino_dht = f"GP{pino_dht}"
+        parts.append({"type": dht_type, "id": "dht1", "top": -130, "left": -140, "attrs": {}})
+        connections.extend([
+            ["dht1:VCC", vcc_pin, "red", []],
+            ["dht1:GND", proximo_gnd(), "black", []],
+            ["dht1:SDA", f"{board_id}:{pino_dht}", "green", []],
+        ])
+
+    # OLED SSD1306
+    if "ssd1306" in texto_pedido or "oled" in texto_pedido:
+        parts.append(
+            {"type": "board-ssd1306", "id": "oled1", "top": 120, "left": -160, "attrs": {"i2cAddress": "0x3c"}}
+        )
+        connections.extend([
+            ["oled1:VCC", vcc_pin, "red", []],
+            ["oled1:GND", proximo_gnd(), "black", []],
+            ["oled1:SDA", f"{board_id}:{sda_default}", "blue", []],
+            ["oled1:SCL", f"{board_id}:{scl_default}", "cyan", []],
+        ])
+
+    # LED RGB (wokwi-rgb-led)
+    if "wokwi-rgb-led" in texto_pedido or "led rgb" in texto_pedido or "rgb" in texto_pedido:
+        com_attr = "cathode" if ("cathode" in texto_pedido or "cátodo" in texto_pedido or "catodo" in texto_pedido) else "anode"
+        parts.extend([
+            {"type": "wokwi-rgb-led", "id": "rgb1", "top": 40, "left": 150, "attrs": {"common": com_attr}},
+            {"type": "wokwi-resistor", "id": "r_red", "top": 110, "left": 110, "attrs": {"value": "220"}},
+            {"type": "wokwi-resistor", "id": "r_green", "top": 110, "left": 150, "attrs": {"value": "220"}},
+            {"type": "wokwi-resistor", "id": "r_blue", "top": 110, "left": 190, "attrs": {"value": "220"}},
+        ])
+        pin_r = "GP16" if board_id == "pico" else "9"
+        pin_g = "GP17" if board_id == "pico" else "10"
+        pin_b = "GP18" if board_id == "pico" else "11"
+        connections.extend([
+            ["rgb1:COM", proximo_gnd() if com_attr == "cathode" else vcc_pin, "black", []],
+            [f"{board_id}:{pin_r}", "r_red:1", "red", []],
+            ["r_red:2", "rgb1:R", "red", []],
+            [f"{board_id}:{pin_g}", "r_green:1", "green", []],
+            ["r_green:2", "rgb1:G", "green", []],
+            [f"{board_id}:{pin_b}", "r_blue:1", "blue", []],
+            ["r_blue:2", "rgb1:B", "blue", []],
+        ])
+    elif "wokwi-led" in texto_pedido or re.search(r"\bled\b", texto_pedido):
+        cores_leds = []
+        if "verde" in texto_pedido or "green" in texto_pedido:
+            cores_leds.append(("led_g", "green", "GP16" if board_id == "pico" else "12"))
+        if "amarelo" in texto_pedido or "yellow" in texto_pedido:
+            cores_leds.append(("led_y", "yellow", "GP17" if board_id == "pico" else "13"))
+        if "vermelho" in texto_pedido or "red" in texto_pedido:
+            cores_leds.append(("led_r", "red", "GP18" if board_id == "pico" else "14"))
+        if not cores_leds:
+            cores_leds.append(("led1", "red", "GP16" if board_id == "pico" else "13"))
+        gnd_led = proximo_gnd()
+        for idx, (lid, cor, pino) in enumerate(cores_leds):
+            rid = f"r_{lid}"
+            left_pos = -150 + idx * 45
+            parts.append({"type": "wokwi-led", "id": lid, "top": 40, "left": left_pos, "attrs": {"color": cor}})
+            parts.append({"type": "wokwi-resistor", "id": rid, "top": 90, "left": left_pos, "attrs": {"value": "220"}})
+            connections.extend([
+                [f"{board_id}:{pino}", f"{rid}:1", cor, []],
+                [f"{rid}:2", f"{lid}:A", cor, []],
+                [f"{lid}:C", gnd_led, "black", []],
+            ])
+
+    # Photoresistor / LDR (somente se pedido)
+    if "photoresistor" in texto_pedido or "ldr" in texto_pedido or "fotoresistor" in texto_pedido:
+        pino_ldr = "GP26" if board_id == "pico" else ("34" if board_id == "esp" else "A0")
+        parts.append({"type": "wokwi-photoresistor-sensor", "id": "ldr1", "top": -120, "left": 130, "attrs": {}})
+        connections.extend([
+            ["ldr1:VCC", vcc_pin, "red", []],
+            ["ldr1:GND", proximo_gnd(), "black", []],
+            ["ldr1:AO", f"{board_id}:{pino_ldr}", "orange", []],
+        ])
+
+    # Potenciômetro (somente se pedido)
+    if "potentiometer" in texto_pedido or "potenciômetro" in texto_pedido or "potenciometro" in texto_pedido:
+        pino_pot = "GP27" if board_id == "pico" else ("35" if board_id == "esp" else "A1")
+        parts.append({"type": "wokwi-potentiometer", "id": "pot1", "top": -20, "left": 170, "attrs": {}})
+        connections.extend([
+            ["pot1:VCC", vcc_pin, "red", []],
+            ["pot1:GND", proximo_gnd(), "black", []],
+            ["pot1:SIG", f"{board_id}:{pino_pot}", "purple", []],
+        ])
+
+    # Servo Motor (somente se pedido)
+    if "wokwi-servo" in texto_pedido or "servo" in texto_pedido:
+        pino_servo = "GP13" if board_id == "pico" else ("18" if board_id == "esp" else "9")
+        v_servo = f"{board_id}:VBUS" if board_id == "pico" else vcc_pin
+        parts.append({"type": "wokwi-servo", "id": "servo1", "top": 120, "left": 150, "attrs": {}})
+        connections.extend([
+            ["servo1:V+", v_servo, "red", []],
+            ["servo1:GND", proximo_gnd(), "black", []],
+            ["servo1:PWM", f"{board_id}:{pino_servo}", "orange", []],
+        ])
+
+    # Pushbutton (somente se pedido)
+    if "pushbutton" in texto_pedido or "botão" in texto_pedido or "botao" in texto_pedido:
+        pino_btn = "GP14" if board_id == "pico" else ("4" if board_id == "esp" else "2")
+        parts.append({"type": "wokwi-pushbutton", "id": "btn1", "top": -80, "left": -40, "attrs": {"color": "blue"}})
+        connections.extend([
+            ["btn1:1.l", f"{board_id}:{pino_btn}", "blue", []],
+            ["btn1:2.r", proximo_gnd(), "black", []],
+        ])
+
+    return {
+        "version": 1,
+        "author": "EdgeAI",
+        "editor": "wokwi",
+        "parts": parts,
+        "connections": connections,
+        "dependencies": {},
+    }
 
 
 def salvar_artefatos(escopo: str, arquitetura: str, codigo: str, pedido_usuario: str = ""):
-    """Salva os artefatos gerados na pasta 'artifacts/' local (incluindo arquivos Wokwi se aplicável)."""
+    """Salva os artefatos gerados na pasta 'artifacts/' local (multi-MCU e multi-linguagem)."""
     pasta_base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
-    modo_wokwi = eh_pedido_wokwi(f"{pedido_usuario}\n{escopo}\n{arquitetura}")
+    perfil = detectar_perfil_projeto(f"{pedido_usuario}\n{escopo}")
+    modo_wokwi = perfil["modo_wokwi"]
+    arq_codigo = perfil["arq_codigo"]
+    linguagem = perfil["linguagem"]
+    board_id = perfil["board_id"]
 
     # Criar pasta específica para esta execução com timestamp (Histórico)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     pasta_run = os.path.join(pasta_base, f"run_{timestamp}")
     os.makedirs(pasta_run, exist_ok=True)
 
-    # Extrair o maior bloco de código Python válido (de codigo ou arquitetura)
-    blocos_py = re.findall(r"```python\s*(.*?)\s*```", f"{codigo}\n{arquitetura}", re.DOTALL)
-    if not blocos_py:
-        blocos_py = re.findall(r"```\s*(.*?)\s*```", codigo, re.DOTALL)
-    if blocos_py:
-        codigo_limpo = max(blocos_py, key=len).strip()
+    # Extrair o maior bloco de código (python, cpp, c, ino) de codigo ou arquitetura
+    blocos_cod = re.findall(
+        r"```(?:python|cpp|c\+\+|c|ino|arduino)\s*(.*?)\s*```",
+        f"{codigo}\n{arquitetura}",
+        re.DOTALL | re.IGNORECASE,
+    )
+    if not blocos_cod:
+        blocos_cod = [
+            b
+            for b in re.findall(r"```\s*(.*?)\s*```", codigo, re.DOTALL)
+            if not b.strip().startswith("{")
+        ]
+    if blocos_cod:
+        codigo_limpo = max(blocos_cod, key=len).strip()
     else:
         codigo_limpo = codigo.strip()
 
-    if modo_wokwi:
+    if modo_wokwi and linguagem == "MicroPython":
         codigo_limpo = sanitizar_codigo_micropython(codigo_limpo)
 
     # Formatar cadeia de raciocínio completa
     raciocinio_completo = (
         f"# Cadeia de Raciocínio Multi-Agente\n\n"
         f"Execução: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n"
-        f"Modelo: `{OLLAMA_MODEL}`\n\n"
+        f"Modelo: `{OLLAMA_MODEL}` | Placa: `{perfil['board_nome']}` | Linguagem: `{linguagem}`\n\n"
         f"---\n\n"
         f"## 🎯 1. Gerente de Projetos (Escopo & Requisitos)\n\n"
         f"{escopo}\n\n"
@@ -658,7 +919,7 @@ def salvar_artefatos(escopo: str, arquitetura: str, codigo: str, pedido_usuario:
         f"## 🏗️ 2. Arquiteto de Sistemas (Design Técnico)\n\n"
         f"{arquitetura}\n\n"
         f"---\n\n"
-        f"## 💻 3. Desenvolvedor Python (Código & Testes Inline)\n\n"
+        f"## 💻 3. Desenvolvedor ({linguagem})\n\n"
         f"{codigo}\n"
     )
 
@@ -669,9 +930,22 @@ def salvar_artefatos(escopo: str, arquitetura: str, codigo: str, pedido_usuario:
         ("raciocinio.md", raciocinio_completo),
     ]
 
+    usa_ssd1306 = "ssd1306" in f"{pedido_usuario}\n{codigo_limpo}".lower()
+
     if modo_wokwi:
-        diagram_dict = extrair_diagram_json(escopo, arquitetura, codigo)
+        diagram_dict = construir_diagram_dinamico(pedido_usuario, escopo, arquitetura, codigo, perfil)
         diagram_str = json.dumps(diagram_dict, indent=2, ensure_ascii=False)
+        arquivos_gerados.append((arq_codigo, codigo_limpo))
+        arquivos_gerados.append(("diagram.json", diagram_str))
+
+        if linguagem == "MicroPython" and usa_ssd1306:
+            arquivos_gerados.append(("ssd1306.py", DRIVER_SSD1306_MICROPYTHON))
+
+        if "Arduino" in linguagem or arq_codigo.endswith((".ino", ".cpp", ".c")):
+            libs_txt = extrair_libraries_txt(codigo_limpo)
+            if libs_txt:
+                arquivos_gerados.append(("libraries.txt", libs_txt))
+
         wokwi_toml = (
             "[wokwi]\n"
             "version = 1\n"
@@ -679,12 +953,7 @@ def salvar_artefatos(escopo: str, arquitetura: str, codigo: str, pedido_usuario:
             'elf = "firmware.uf2"\n'
             "rfc2217ServerPort = 4000\n"
         )
-        arquivos_gerados.extend([
-            ("main.py", codigo_limpo),
-            ("diagram.json", diagram_str),
-            ("ssd1306.py", DRIVER_SSD1306_MICROPYTHON),
-            ("wokwi.toml", wokwi_toml),
-        ])
+        arquivos_gerados.append(("wokwi.toml", wokwi_toml))
 
     # 1. Salvar na subpasta da execução (Histórico)
     for nome_arq, conteudo in arquivos_gerados:
@@ -697,19 +966,21 @@ def salvar_artefatos(escopo: str, arquitetura: str, codigo: str, pedido_usuario:
         with open(os.path.join(pasta_base, nome_arq), "w", encoding="utf-8") as f:
             f.write(conteudo)
 
-    if modo_wokwi:
+    if modo_wokwi and linguagem == "MicroPython" and board_id == "pico":
         uf2_run = os.path.join(pasta_run, "firmware.uf2")
         uf2_latest = os.path.join(pasta_base, "firmware.uf2")
-        if gerar_firmware_uf2_wokwi(codigo_limpo, DRIVER_SSD1306_MICROPYTHON, uf2_run):
+        ssd_code = DRIVER_SSD1306_MICROPYTHON if usa_ssd1306 else ""
+        if gerar_firmware_uf2_wokwi(codigo_limpo, ssd_code, uf2_run):
             import shutil
             shutil.copyfile(uf2_run, uf2_latest)
 
     console.print(f"[bold green]✓ Histórico gravado em:[/bold green] [cyan]{pasta_run}/[/cyan]")
     console.print(f"[bold green]✓ Versão mais recente atualizada em:[/bold green] [cyan]{pasta_base}/[/cyan]")
     if modo_wokwi:
+        nomes_wokwi = ", ".join(n for n, _ in arquivos_gerados if n not in ("escopo.md", "arquitetura.md", "raciocinio.md"))
         console.print(
-            "[bold cyan]✓ Artefatos Wokwi prontos para simulação:[/bold cyan] "
-            "[white]main.py, diagram.json, ssd1306.py, wokwi.toml[/white]"
+            f"[bold cyan]✓ Artefatos Wokwi ({perfil['board_nome']} / {linguagem}):[/bold cyan] "
+            f"[white]{nomes_wokwi}[/white]"
         )
 
 

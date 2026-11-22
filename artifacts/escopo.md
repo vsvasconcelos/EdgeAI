@@ -1,77 +1,272 @@
 # Documento de Escopo Técnico
 
-## 1. Estrutura do Projeto
+## 1. Plataforma Alvo e Linguagem / SDK
 
-### 1.1. Arquivos do Projeto
+- **Plataforma**: Raspberry Pi Pico (RP2040)
+- **Linguagem / SDK**: MicroPython
 
-- **main.py**: Código principal que inicializa o sistema e controla os componentes.
-- **config.json**: Configurações gerais do sistema, incluindo parâmetros de tempo e conversões ADC.
-- **diagram.json**: Descrição dos pinos e conexões entre os componentes no Wokwi Pi Pico.
+## 2. Artefatos de Saída
 
-### 1.2. Código Fonte
+### 2.1 Código-fonte completo, modularizado e comentado no padrão PEP-8
 
-O código deve ser modularizado, com funções separadas para cada tarefa principal (leitura de sensores, controle do servo, etc.). O código deve seguir o padrão PEP-8 e não usar `time.sleep()` longo no loop principal.
+```python
+# main.py
+import machine
+import dht
+import ssd1306
+import time
+import json
 
-### 1.3. Diagram.json
+class SSD1306_I2C:
+    def __init__(self, i2c, addr):
+        self.i2c = i2c
+        self.display = ssd1306.SSD1306_I2C(128, 64, i2c, addr)
 
-O arquivo diagram.json deve incluir todas as conexões entre os componentes, especificando os pinos GPIO, ADCs, PWMs e I2Cs. O arquivo deve ser válido para o Wokwi Pi Pico e não deve conter resistores limitadores de corrente nos LEDs.
+    def clear(self):
+        self.display.fill(0)
+        self.display.show()
 
-## 2. Requisitos Funcionais
+    def draw_header(self):
+        self.display.text("MBA -FIA", 0, 0, 1)
+        self.display.hline(0, 12, 128, 1)
 
-### 2.1. Aquisição de Sensores e Escalonamento
+    def draw_temperature(self, temp):
+        self.display.text(f"Temp: {temp:.1f} C", 0, 24, 1)
 
-- **Sensor DHT22 (GP15)**: Ler a temperatura (°C) e umidade (%) a cada 2000 ms.
-- **Fotoresistor / LDR (GP26)**: Ler a luminosidade (0% a 100%) a cada 200 ms, convertendo para o intervalo de 0 a 65535.
-- **Potenciômetro (GP27)**: Ler o setpoint de temperatura (15°C a 40°C) a cada 200 ms, convertendo para o intervalo de 0 a 65535.
+    def draw_humidity(self, hum):
+        self.display.text(f"Umid: {hum:.1f} %", 0, 42, 1)
 
-### 2.2. Controle Proporcional de Ventilação
+def main():
+    i2c = machine.I2C(0)
+    dht_sensor = dht.DHT22(machine.Pin(15))
+    oled_display = SSD1306_I2C(i2c, 0x3c)
+    
+    last_dht_read = time.ticks_ms()
+    last_oled_update = time.ticks_ms()
 
-- **Servo Motor (GP13)**: Comparar a temperatura atual com o setpoint:
-  - Se T_atual <= T_set: Servo fechado em 0°.
-  - Se T_atual > T_set: Abrir a janela proporcionalmente entre 0° e 90°, atingindo abertura máxima (90°) quando T_atual >= T_set + 5.0°C.
+    while True:
+        if time.ticks_diff(time.ticks_ms(), last_dht_read) >= 2000:
+            try:
+                dht_sensor.measure()
+                temp_c = dht_sensor.temperature()
+                hum = dht_sensor.humidity()
+            except OSError as e:
+                oled_display.clear()
+                oled_display.draw_header()
+                oled_display.draw_temperature("ERRO SENSOR")
+                oled_display.draw_humidity("ERRO SENSOR")
+                oled_display.show()
+                print("ERRO SENSOR")
+                continue
 
-### 2.3. Controle PWM de Iluminação Auxiliar
+            last_dht_read = time.ticks_ms()
 
-- **LED Amarelo (GP17)**: Ajustar o brilho via PWM inversamente proporcional à luminosidade, acionando iluminação auxiliar quando a luminosidade cair abaixo de 40%.
+        if time.ticks_diff(time.ticks_ms(), last_oled_update) >= 1000:
+            oled_display.clear()
+            oled_display.draw_header()
+            oled_display.draw_temperature(temp_c)
+            oled_display.draw_humidity(hum)
+            oled_display.show()
+            last_oled_update = time.ticks_ms()
 
-### 2.4. Sinalização de Estado e Alarme Crítico
+        # Sinalização visual via LED RGB
+        led_color = "GREEN"
+        if temp_c > 30.0 or hum < 30.0:
+            led_color = "RED"
+        elif temp_c < 18.0 or hum > 75.0:
+            led_color = "BLUE"
+        elif 18.0 <= temp_c <= 26.0 and 40.0 <= hum <= 70.0:
+            led_color = "GREEN"
+        else:
+            led_color = "YELLOW"
 
-- **LED Verde (GP16)**: Indicador de sistema operando em faixa normal.
-- **LED Vermelho (GP18)**: Alerta de baixa luminosidade e alarme crítico.
+        # Acionar os canais RGB
+        if led_color == "RED":
+            machine.Pin(16, machine.Pin.OUT).value(1)
+            machine.Pin(17, machine.Pin.OUT).value(0)
+            machine.Pin(18, machine.Pin.OUT).value(0)
+        elif led_color == "BLUE":
+            machine.Pin(16, machine.Pin.OUT).value(0)
+            machine.Pin(17, machine.Pin.OUT).value(0)
+            machine.Pin(18, machine.Pin.OUT).value(1)
+        else:
+            machine.Pin(16, machine.Pin.OUT).value(0)
+            machine.Pin(17, machine.Pin.OUT).value(1)
+            machine.Pin(18, machine.Pin.OUT).value(0)
 
-### 2.5. Interface Gráfica no Display OLED I2C
+        # Telemetria via Console Serial
+        telemetry = {
+            "temp": temp_c,
+            "hum": hum,
+            "led_color": led_color
+        }
+        print(json.dumps(telemetry))
 
-- Atualizar o display a cada 500 ms sem causar cintilação.
-- O botão no GP14 deve alternar entre duas telas: Operação e Diagnóstico.
+if __name__ == "__main__":
+    main()
+```
 
-### 2.6. Telemetria Estruturada via Serial
+### 2.2 Arquivo diagram.json válido para o Wokwi Pi Pico contendo todas as conexões de hardware mapeadas abaixo, pronto para execução imediata sem sobreposição de componentes
 
-- Imprimir no console serial do Wokwi a cada 2 segundos, uma linha JSON contendo o estado completo do nó.
+```json
+{
+  "components": [
+    {
+      "id": "wokwi-pi-pico",
+      "type": "wokwi-pi-pico",
+      "attrs": {}
+    },
+    {
+      "id": "wokwi-dht22",
+      "type": "wokwi-dht22",
+      "attrs": {
+        "pin": 15
+      }
+    },
+    {
+      "id": "board-ssd1306",
+      "type": "board-ssd1306",
+      "attrs": {
+        "i2c": "wokwi-pi-pico:i2c0",
+        "addr": 0x3c
+      }
+    },
+    {
+      "id": "wokwi-rgb-led",
+      "type": "wokwi-rgb-led",
+      "attrs": {
+        "common": "cathode",
+        "pins": [16, 17, 18]
+      }
+    },
+    {
+      "id": "wokwi-resistor",
+      "type": "wokwi-resistor",
+      "attrs": {
+        "value": "220"
+      }
+    },
+    {
+      "id": "wokwi-resistor-2",
+      "type": "wokwi-resistor",
+      "attrs": {
+        "value": "220"
+      }
+    },
+    {
+      "id": "wokwi-resistor-3",
+      "type": "wokwi-resistor",
+      "attrs": {
+        "value": "220"
+      }
+    }
+  ],
+  "connections": [
+    {
+      "from": "wokwi-pi-pico:3V3",
+      "to": "board-ssd1306:vcc"
+    },
+    {
+      "from": "wokwi-pi-pico:gnd.2",
+      "to": "board-ssd1306:gnd"
+    },
+    {
+      "from": "wokwi-pi-pico:gp4",
+      "to": "board-ssd1306:sda"
+    },
+    {
+      "from": "wokwi-pi-pico:gp5",
+      "to": "board-ssd1306:scl"
+    },
+    {
+      "from": "wokwi-pi-pico:gnd.3",
+      "to": "wokwi-rgb-led:com"
+    },
+    {
+      "from": "wokwi-pi-pico:gp16",
+      "to": "wokwi-rgb-led:r"
+    },
+    {
+      "from": "wokwi-pi-pico:gp17",
+      "to": "wokwi-rgb-led:g"
+    },
+    {
+      "from": "wokwi-pi-pico:gp18",
+      "to": "wokwi-rgb-led:b"
+    }
+  ]
+}
+```
 
-## 3. Requisitos Não Funcionais
+## 3. Mapa de Hardware e Pinagem Obrigatória (Pinout RP2040)
 
-### 3.1. Arquitetura Não-Bloqueante
+| Pino | Função |
+|------|--------|
+| GP0  | GPIO0  |
+| GP1  | GPIO1  |
+| GP2  | GPIO2  |
+| GP3  | GPIO3  |
+| GP4  | SDA    |
+| GP5  | SCL    |
+| GP6  | GPIO6  |
+| GP7  | GPIO7  |
+| GP8  | GPIO8  |
+| GP9  | GPIO9  |
+| GP10 | GPIO10 |
+| GP11 | GPIO11 |
+| GP12 | GPIO12 |
+| GP13 | GND.1  |
+| GP14 | VCC    |
+| GP15 | SDA    |
+| GP16 | R      |
+| GP17 | G      |
+| GP18 | B      |
+| GP19 | GPIO19 |
+| GP20 | GPIO20 |
+| GP21 | GPIO21 |
+| GP22 | GPIO22 |
+| GP23 | GPIO23 |
+| GP24 | GPIO24 |
+| GP25 | GPIO25 |
+| GP26 | GND.2  |
+| GP27 | VCC    |
 
-- Proibir o uso de `time.sleep()` longo no loop principal.
-- Escalonar a leitura do DHT22 (0.5 Hz), a leitura dos ADCs (5 Hz) e a atualização do OLED (2 Hz) por temporizadores não-bloqueantes.
+## 4. Requisitos Funcionais (RF)
 
-### 3.2. Tratamento de Falha de Sensor
+### RF01 – Aquisição de Dados do DHT22
+- Ler o sensor DHT22 conectado ao GP15 a cada 2.000 ms (respeitando o intervalo mínimo de amostragem do sensor).
 
-- Caso a leitura do DHT22 lance exceção (`OSError`), registrar "temp": null no JSON, exibir "ERRO DHT22" no OLED e piscar o LED Vermelho.
+### RF02 – Interface Gráfica no Display OLED I2C (GP4/GP5)
+- Atualizar o display OLED SSD1306 (128x64 pixels, endereço I2C 0x3c) a cada 1.000 ms sem causar cintilação excessiva.
+- O layout de tela deve seguir rigorosamente 3 linhas de texto:
+  * Linha 1 (Cabeçalho): Exibir exatamente o texto "MBA -FIA" centralizado ou alinhado no topo (y=0), seguido de uma linha horizontal divisória (y=12).
+  * Linha 2: Exibir a temperatura atualizada.
+  * Linha 3: Exibir a humidade atualizada.
 
-### 3.3. Fidelidade do diagram.json
+### RF03 – Sinalização Visual via LED RGB
+- Acionar os canais RGB com base nas condições de temperatura e humidade:
+  - Se a temperatura for maior que 30°C ou a humidade menor que 30%, o LED deve ficar vermelho.
+  - Se a temperatura for menor que 18°C ou a humidade maior que 75%, o LED deve ficar azul.
+  - Caso contrário, se a temperatura estiver entre 18°C e 26°C e a humidade entre 40% e 70%, o LED deve ficar verde.
+  - Se nenhuma das condições acima for atendida, o LED deve ficar amarelo.
 
-- O arquivo diagram.json deve conectar explicitamente GND e 3V3/VBUS de todos os periféricos.
-- Incluir resistores limitadores de corrente nos LEDs.
-- Usar os nomes exatos dos pinos do wokwi-pi-pico (GP4, GP5, GP13, GP14, GP15, GP16, GP17, GP18, GP26, GP27).
+### RF04 – Telemetria via Console Serial
+- Exibir os dados de temperatura, humidade e cor do LED no console serial a cada atualização da interface gráfica.
 
-## 4. Entregáveis
+## 5. Requisitos Adicionais
 
-- **Mapa de Hardware e Pinagem**: Exato no wokwi-pi-pico (GP4, GP5, GP13, GP14, GP15, GP16, GP17, GP18, GP26, GP27).
-- **Requisitos Funcionais**: Amostragem, conversões ADC 0-65535, controle proporcional do Servo, PWM do LED, telas do OLED, IRQ do botão e telemetria JSON via Serial.
-- **Critérios de Aceitação e Tratamento de Falhas**: OSError no DHT22.
-- **Restrições de Plataforma**: MicroPython nativo (`machine`, `dht`, `time`, `json`, `ssd1306`). Proibir usar `Adafruit_DHT`, `board`, `digitalio` ou `wokwi_gpio`.
+### 5.1 Modularização do Código
+- O código deve ser modularizado para facilitar a manutenção e reutilização.
 
----
+### 5.2 Tratamento de Erros
+- O código deve tratar erros de comunicação com o sensor DHT22 e atualizar o display e o LED corretamente.
 
-Este documento fornece uma estrutura clara e detalhada para o projeto, garantindo que todos os requisitos sejam cumpridos e que a arquitetura seja não-bloqueante.
+### 5.3 Conexões I2C
+- As conexões I2C devem ser feitas corretamente para que o display OLED funcione adequadamente.
+
+## 6. Requisitos de Desenvolvimento
+
+### 6.1 Tecnologias Utilizadas
+- Python
+- MicroPython
+- DHT22
