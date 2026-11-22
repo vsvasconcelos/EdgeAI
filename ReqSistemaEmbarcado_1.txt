@@ -1,0 +1,51 @@
+Atue como um Engenheiro de Sistemas Embarcados Sênior. Implemente a especificação abaixo para Raspberry Pi Pico utilizando MicroPython. Entregue: (1) o código-fonte completo em MicroPython (arquivo main.py e módulo driver ssd1306.py embutido ou separado, sem dependências externas não nativas) limpo, comentado no padrão PEP-8 e não-bloqueante; e (2) o arquivo diagram.json completo e válido, pronto para execução imediata no simulador Wokwi (wokwi-pi-pico). Respeite rigorosamente cada pino GPIO e I2C definidos na tabela de hardware.
+
+Especificação de Requisitos: Monitor Ambiental Simplificado (Raspberry Pi Pico)
+
+1. Stack e Entregáveis Esperados do Agente
+
+Plataforma Alvo: Raspberry Pi Pico (RP2040).
+Linguagem / SDK: MicroPython.
+Artefatos de Saída:
+
+1. Código-fonte completo, modularizado e comentado no padrão PEP-8 (incluindo a classe SSD1306_I2C para que o código rode diretamente no Wokwi sem precisar baixar pacotes externos).
+2. Arquivo diagram.json válido para o Wokwi Pi Pico contendo todas as conexões de hardware mapeadas abaixo, pronto para execução imediata sem sobreposição de componentes.
+3. Mapa de Hardware e Pinagem Obrigatória (Pinout RP2040)
+
+Todos os componentes abaixo existem nativamente na paleta do Wokwi e devem ser conectados estritamente nos pinos especificados:
+
+Componente (Wokwi ID) | Função no Sistema | Interface | Pinos Obrigatórios no Pi Pico e Atributos
+Sensor DHT22 (wokwi-dht22) | Leitura de Temperatura (°C) e Umidade (%) | Digital (1-Wire) | VCC -> 3V3, GND -> GND.1, SDA -> GP15
+Display OLED SSD1306 (board-ssd1306) | Exibição do cabeçalho e leituras locais | I2C0 (addr 0x3c) | VCC -> 3V3, GND -> GND.2, SDA -> GP4, SCL -> GP5
+LED RGB Cátodo Comum (wokwi-rgb-led) | Sinalização visual por faixas de temperatura e umidade | Digital Out | COM -> GND.3 (atributo "common": "cathode"), R -> GP16 (via resistor 220 ohms), G -> GP17 (via resistor 220 ohms), B -> GP18 (via resistor 220 ohms)
+
+3. Requisitos Funcionais (RF)
+
+RF01 – Aquisição de Dados do DHT22:
+Ler o sensor DHT22 conectado ao GP15 a cada 2.000 ms (respeitando o intervalo mínimo de amostragem do sensor).
+
+RF02 – Interface Gráfica no Display OLED I2C (GP4/GP5):
+Atualizar o display OLED SSD1306 (128x64 pixels, endereço I2C 0x3c) a cada 1.000 ms sem causar cintilação excessiva.
+O layout de tela deve seguir rigorosamente 3 linhas de texto:
+
+* Linha 1 (Cabeçalho): Exibir exatamente o texto "MBA-FIAP" centralizado ou alinhado no topo (y=0), seguido de uma linha horizontal divisória (y=12).
+* Linha 2 (Temperatura): Exibir "Temp: XX.X C" (y=24).
+* Linha 3 (Umidade): Exibir "Umid: XX.X %" (y=42).
+
+RF03 – Sinalização Visual via LED RGB (GP16, GP17, GP18):
+Acionar os canais R (GP16), G (GP17) e B (GP18) em lógica ativa alta (1 = ligado, 0 = desligado) conforme a combinação de Temperatura (T) e Umidade (U) lidas, obedecendo à seguinte ordem de prioridade:
+
+1. Alerta Crítico / Desconforto Severo (Cor Vermelha -> R=1, G=0, B=0): Quando T > 30.0 °C OU U < 30.0 %.
+2. Ambiente Frio / Úmido (Cor Azul -> R=0, G=0, B=1): Quando T < 18.0 °C OU U > 75.0 % (desde que não entre na condição Vermelha).
+3. Faixa de Conforto Ideal (Cor Verde -> R=0, G=1, B=0): Quando 18.0 °C <= T <= 26.0 °C E 40.0 % <= U <= 70.0 %.
+4. Faixa de Atenção Moderada (Cor Amarela -> R=1, G=1, B=0): Para qualquer outra condição intermediária válida (ex.: T entre 26.1 °C e 30.0 °C, ou umidade entre 30.0 % e 39.9 % ou entre 70.1 % e 75.0 %).
+
+RF04 – Telemetria via Console Serial (USB/UART):
+Imprimir no console serial do Wokwi, a cada 2.000 ms, uma linha JSON compacta contendo o estado atual:
+{"temp": 24.5, "hum": 55.0, "led_color": "GREEN"}
+
+4. Requisitos Não Funcionais (RNF)
+
+RNF01 – Arquitetura Não-Bloqueante: Proibido o uso de time.sleep() longo no loop principal. O escalonamento da leitura do DHT22 (2.000 ms) e da atualização do display OLED (1.000 ms) deve ser controlado por temporizadores não-bloqueantes utilizando time.ticks_ms() e time.ticks_diff().
+RNF02 – Tratamento de Falha de Sensor: Caso a leitura do DHT22 lance exceção (OSError), o sistema não pode travar; deve exibir "ERRO SENSOR" nas linhas inferiores do OLED (mantendo o cabeçalho "MBA -FIAP"), acender o LED RGB na cor Magenta (R=1, G=0, B=1) e registrar "temp": null, "hum": null no console serial.
+RNF03 – Fidelidade do diagram.json: O arquivo diagram.json gerado pelo agente deve usar obrigatoriamente os tipos "wokwi-pi-pico", "wokwi-dht22", "board-ssd1306", "wokwi-rgb-led" (com "attrs": {"common": "cathode"}) e três "wokwi-resistor" ("value": "220"). Todos os pinos de alimentação (3V3 e GND) devem estar explicitamente conectados.

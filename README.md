@@ -43,23 +43,27 @@ Adicionalmente, o projeto inclui um servidor **MCP (Model Context Protocol)** pa
 
 ## 🏗️ Arquitetura do Sistema
 
-O fluxo de trabalho foi estruturado como um pipeline linear direto. Cada etapa é uma chamada direta (via LangChain / ChatOllama) que recebe apenas o resumo técnico purificado do agente anterior, mantendo a janela de contexto limpa e prevenindo crashs de memória.
+O fluxo de trabalho combina um pipeline sequencial enxuto com um **Loop Dinâmico de Verificação QA e Auto-Correção Stateless** (até 3 tentativas). Cada etapa recebe apenas o contexto purificado necessário, mantendo a janela de contexto abaixo de 4096 tokens e prevenindo estouro de VRAM na GPU de 2GB.
 
 ```mermaid
 graph TD
-    U["👤 Usuário"] -->|Pedido de Software| GP["🎯 Gerente de Projetos (Define o Escopo)"]
-    GP -->|Requisitos e Restrições| ARQ["🏗️ Arquiteto de Sistemas (Design Técnico)"]
-    ARQ -->|Estrutura e Assinaturas| DEV["💻 Desenvolvedor Python (Código e Testes)"]
-    DEV -->|Código Final e Testes Inline| R["📄 Gravação de Artefatos (pasta artifacts/)"]
+    U["👤 Usuário"] -->|Pedido de Software / Embarcado| GP["🎯 1. Gerente de Projetos (Define o Escopo)"]
+    GP -->|Requisitos e Restrições| ARQ["🏗️ 2. Arquiteto de Sistemas (Design Técnico)"]
+    ARQ -->|Estrutura e Assinaturas| DEV["💻 3. Desenvolvedor (Código e Diagrama Wokwi)"]
+    DEV -->|Código Gerado| QA["🧪 4. Verificador QA & Sandbox Real (AST + Mock RP2040/Python)"]
+    QA -->|Reprovado: Envia Traceback Real + Regra Violada| COR["🔄 Agente Corretor QA (Loop Dinâmico Stateless)"]
+    COR -->|Código Corrigido| QA
+    QA -->|Aprovado em todos os testes| R["📄 Gravação de Artefatos + firmware.uf2 (pasta artifacts/)"]
 ```
 
-### Personas dos Agentes
+### Personas dos Agentes e Verificador QA
 
-| Agente                         | Função no Pipeline                                                  | Diretriz do Prompt                                                                                     |
+| Agente / Etapa                 | Função no Pipeline                                                  | Diretriz / Validação Executada                                                                         |
 | :----------------------------- | :------------------------------------------------------------------ | :----------------------------------------------------------------------------------------------------- |
-| **🎯 Gerente de Projetos (GP)** | Analisa o pedido do usuário e define os limites do projeto.         | Documento conciso: requisitos funcionais, critérios de aceitação e restrições.                         |
-| **🏗️ Arquiteto de Sistemas**    | Cria o design técnico a partir do escopo do GP.                     | Assinaturas de funções, escolha do algoritmo e fluxo de dados (sem escrever código real).              |
-| **💻 Desenvolvedor Python**     | Implementa o código Python completo baseado no design do Arquiteto. | Código limpo com type-hints, bloco `if __name__ == '__main__':` de teste e testes inline com veredito. |
+| **🎯 Gerente de Projetos (GP)** | Analisa o pedido do usuário e define os limites do projeto.         | Documento conciso: mapa de hardware exclusivo do pedido, requisitos funcionais, não-funcionais e SDK.  |
+| **🏗️ Arquiteto de Sistemas**    | Cria o design técnico a partir do escopo do GP.                     | Imports obrigatórios, assinaturas de funções, regras exatas de negócio e escalonamento não-bloqueante. |
+| **💻 Desenvolvedor**            | Implementa o código completo (`main.py`/`sketch.ino`/`codigo.py`).  | Código limpo PEP-8, sem dependências externas proibidas, acompanhado do `diagram.json` oficial Wokwi.  |
+| **🧪 Verificador QA & Sandbox** | Executa testes reais sobre o código e o circuito antes de aprovar.  | Valida AST/Escopo (`NameError`/`SyntaxError`), roda o código em Sandbox MicroPython/Python (incluindo injeção de falha `OSError`), confere pinos `main.py ↔ diagram.json` e aciona o **Agente Corretor QA** em loop dinâmico se houver falha. |
 
 ---
 

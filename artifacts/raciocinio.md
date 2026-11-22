@@ -1,129 +1,206 @@
 # Cadeia de Raciocínio Multi-Agente
 
-Execução: 22/11/2026 17:01:13
-Modelo: `qwen2.5-coder:3b`
+Execução: 22/11/2026 18:29:35
+Modelo: `qwen2.5-coder:3b` | Placa: `Raspberry Pi Pico (RP2040)` | Linguagem: `MicroPython`
 
 ---
 
 ## 🎯 1. Gerente de Projetos (Escopo & Requisitos)
 
-# Documento de Escopo Técnico
+### Documento de Escopo Técnico
 
-## 1. Plataforma Alvo e Linguagem / SDK
+#### Plataforma Alvo:
+- Raspberry Pi Pico (RP2040)
+- MicroPython
 
-- **Plataforma**: Raspberry Pi Pico (RP2040)
-- **Linguagem / SDK**: MicroPython
+#### Artefatos de Saída:
 
-## 2. Artefatos de Saída
+1. **Código-fonte completo em MicroPython** (`main.py` e `driver/ssd1306.py`):
+   - Modularizado e comentado no padrão PEP-8.
+   - Não-bloqueante, usando temporizadores não-bloqueantes com `time.ticks_ms()` e `time.ticks_diff()`.
+   - Sem dependências externas não nativas.
 
-### 2.1 Código-fonte completo, modularizado e comentado no padrão PEP-8
+2. **Arquivo diagram.json válido para o Wokwi Pi Pico**:
+   - Contendo todas as conexões de hardware mapeadas, pronto para execução imediata sem sobreposição de componentes.
+   - Fidelidade ao diagram.json: Usando obrigatoriamente os tipos "wokwi-pi-pico", "wokwi-dht22", "board-ssd1306", "wokwi-rgb-led" (com "attrs": {"common": "cathode"}) e três "wokwi-resistor" ("value": "220").
+   - Pinos de alimentação (3V3 e GND) explicitamente conectados.
+
+#### Mapa de Hardware e Pinagem Obrigatória:
+
+| Componente (Wokwi ID) | Função no Sistema | Interface | Pinos Obrigatórios no Pi Pico e Atributos |
+|-----------------------|-------------------|----------|----------------------------------------|
+| wokwi-dht22          | Leitura de Temperatura (°C) e Umidade (%) | Digital (1-Wire) | VCC -> 3V3, GND -> GND.1, SDA -> GP15 |
+| board-ssd1306        | Exibição do cabeçalho e leituras locais | I2C0 (addr 0x3c) | VCC -> 3V3, GND -> GND.2, SDA -> GP4, SCL -> GP5 |
+| wokwi-rgb-led        | Sinalização visual por faixas de temperatura e umidade | Digital Out | COM -> GND.3 (atributo "common": "cathode"), R -> GP16 (via resistor 220 ohms), G -> GP17 (via resistor 220 ohms), B -> GP18 (via resistor 220 ohms) |
+
+#### Requisitos Funcionais:
+
+1. **RF01 – Aquisição de Dados do DHT22**:
+   - Ler o sensor DHT22 conectado ao GP15 a cada 2.000 ms.
+
+2. **RF02 – Interface Gráfica no Display OLED I2C (GP4/GP5)**:
+   - Atualizar o display OLED SSD1306 (128x64 pixels, endereço I2C 0x3c) a cada 1.000 ms.
+   - Layout de tela:
+     * Linha 1: "MBA-FIAP" centralizado ou alinhado no topo (y=0), linha horizontal divisória (y=12).
+     * Linha 2: "Temp: XX.X C" (y=24).
+     * Linha 3: "Umid: XX.X %" (y=42).
+
+3. **RF03 – Sinalização Visual via LED RGB (GP16, GP17, GP18)**:
+   - Acionar os canais R, G e B em lógica ativa alta conforme a combinação de Temperatura (T) e Umidade (U), obedecendo à seguinte ordem de prioridade:
+     1. Alerta Crítico / Desconforto Severo: Cor Vermelha -> R=1, G=0, B=0.
+     2. Ambiente Frio / Úmido: Cor Azul -> R=0, G=0, B=1.
+     3. Faixa de Conforto Ideal: Cor Verde -> R=0, G=1, B=0.
+     4. Faixa de Atenção Moderada: Cor Amarela -> R=1, G=1, B=0.
+
+4. **RF04 – Telemetria via Console Serial (USB/UART)**:
+   - Imprimir no console serial do Wokwi a cada 2.000 ms, uma linha JSON compacta contendo o estado atual: `{"temp": XX.X, "hum": XX.X, "led_color": "COLOR"}`.
+
+#### Requisitos Não Funcionais:
+
+1. **RNF01 – Arquitetura Não-Bloqueante**:
+   - Proibido o uso de `time.sleep()` longo no loop principal.
+   - Escalonamento da leitura do DHT22 (2.000 ms) e atualização do display OLED (1.000 ms) controlado por temporizadores não-bloqueantes utilizando `time.ticks_ms()` e `time.ticks_diff()`.
+
+2. **RNF02 – Tratamento de Falha de Sensor**:
+   - Caso a leitura do DHT22 lance exceção (`OSError`), o sistema deve exibir "ERRO SENSOR" nas linhas inferiores do OLED (mantendo o cabeçalho "MBA-FIAP"), acender o LED RGB na cor Magenta (R=1, G=0, B=1) e registrar `{"temp": null, "hum": null}` no console serial.
+
+3. **RNF03 – Fidelidade do diagram.json**:
+   - O arquivo diagram.json gerado pelo agente deve usar obrigatoriamente os tipos "wokwi-pi-pico", "wokwi-dht22", "board-ssd1306", "wokwi-rgb-led" (com "attrs": {"common": "cathode"}) e três "wokwi-resistor" ("value": "220").
+   - Pinos de alimentação (3V3 e GND) explicitamente conectados.
+
+#### Restrições de Plataforma:
+- Linguagem: MicroPython nativo (`from machine import ...`, `import time`, `import json`).
+- Se houver DHT22/DHT11 use `import dht` com `.measure()`, `.temperature()` e `.humidity()`.
+- Se houver OLED SSD1306 use `from ssd1306 import SSD1306_I2C`.
+- Use temporização não-bloqueante com `time.ticks_ms()` e `time.ticks_diff()`.
+- Proibido importar `Adafruit_*`, `board`, `digitalio` ou `wokwi_gpio`.
+
+---
+
+## 🏗️ 2. Arquiteto de Sistemas (Design Técnico)
+
+### Inicialização dos Periféricos
+
+1. **Inicialização do DHT22**:
+   - Importar `dht` e criar um objeto `DHT22` conectado ao GPIO 15.
+   ```python
+   from dht import DHT22
+   dht_sensor = DHT22(machine.Pin(15))
+   ```
+
+2. **Inicialização do Display OLED SSD1306**:
+   - Importar `SSD1306_I2C` e criar um objeto `SSD1306_I2C` com endereço 0x3c, usando GPIOs 4 e 5.
+   ```python
+   from ssd1306 import SSD1306_I2C
+   display = SSD1306_I2C(128, 64, machine.I2C(scl=machine.Pin(5), sda=machine.Pin(4)))
+   ```
+
+3. **Inicialização do LED RGB**:
+   - Importar `machine` e criar objetos `Pin` para os canais R, G e B com atributo "common": "cathode".
+   ```python
+   from machine import Pin
+   led_r = Pin(16, Pin.OUT)
+   led_g = Pin(17, Pin.OUT)
+   led_b = Pin(18, Pin.OUT)
+   ```
+
+### Assinaturas das Funções
+
+1. **Função para Ler DHT22**:
+   - Retorna um dicionário com as temperaturas e umidades.
+   ```python
+   def read_dht():
+       try:
+           dht_sensor.measure()
+           temp = dht_sensor.temperature()
+           hum = dht_sensor.humidity()
+           return {"temp": temp, "hum": hum}
+       except OSError:
+           return {"temp": None, "hum": None}
+   ```
+
+2. **Função para Atualizar Display OLED**:
+   - Recebe um dicionário com as temperaturas e umidades e atualiza o display.
+   ```python
+   def update_display(data):
+       display.fill(0)
+       display.text("MBA-FIAP", 16, 0, 1)
+       display.line(0, 12, 128, 12, 1)
+       if data["temp"] is not None and data["hum"] is not None:
+           display.text(f"Temp: {data['temp']:.1f} C", 16, 24, 1)
+           display.text(f"Hum: {data['hum']:.1f}%", 16, 42, 1)
+       else:
+           display.text("ERRO SENSOR", 16, 24, 1)
+           display.text("ERRO SENSOR", 16, 42, 1)
+       display.show()
+   ```
+
+3. **Função para Sinalização Visual via LED RGB**:
+   - Recebe um dicionário com as temperaturas e umidades e aciona os canais R, G e B.
+   ```python
+   def set_led_color(data):
+       if data["temp"] is not None and data["hum"] is not None:
+           temp = data["temp"]
+           hum = data["hum"]
+           if temp < 15 or hum > 60:
+               led_r.value(1)
+               led_g.value(0)
+               led_b.value(0)
+           elif temp >= 20 and temp <= 30 and hum >= 40 and hum <= 70:
+               led_r.value(0)
+               led_g.value(1)
+               led_b.value(0)
+           else:
+               led_r.value(1)
+               led_g.value(1)
+               led_b.value(0)
+       else:
+           led_r.value(1)
+           led_g.value(0)
+           led_b.value(1)
+   ```
+
+4. **Função para Telemetria via Console Serial**:
+   - Imprime um dicionário JSON no console serial.
+   ```python
+   def send_telemetry(data):
+       print(json.dumps(data))
+   ```
+
+### Estrutura do Loop Principal
 
 ```python
-# main.py
-import machine
-import dht
-import ssd1306
 import time
-import json
 
-class SSD1306_I2C:
-    def __init__(self, i2c, addr):
-        self.i2c = i2c
-        self.display = ssd1306.SSD1306_I2C(128, 64, i2c, addr)
-
-    def clear(self):
-        self.display.fill(0)
-        self.display.show()
-
-    def draw_header(self):
-        self.display.text("MBA -FIA", 0, 0, 1)
-        self.display.hline(0, 12, 128, 1)
-
-    def draw_temperature(self, temp):
-        self.display.text(f"Temp: {temp:.1f} C", 0, 24, 1)
-
-    def draw_humidity(self, hum):
-        self.display.text(f"Umid: {hum:.1f} %", 0, 42, 1)
-
-def main():
-    i2c = machine.I2C(0)
-    dht_sensor = dht.DHT22(machine.Pin(15))
-    oled_display = SSD1306_I2C(i2c, 0x3c)
+while True:
+    current_time = time.ticks_ms()
     
-    last_dht_read = time.ticks_ms()
-    last_oled_update = time.ticks_ms()
-
-    while True:
-        if time.ticks_diff(time.ticks_ms(), last_dht_read) >= 2000:
-            try:
-                dht_sensor.measure()
-                temp_c = dht_sensor.temperature()
-                hum = dht_sensor.humidity()
-            except OSError as e:
-                oled_display.clear()
-                oled_display.draw_header()
-                oled_display.draw_temperature("ERRO SENSOR")
-                oled_display.draw_humidity("ERRO SENSOR")
-                oled_display.show()
-                print("ERRO SENSOR")
-                continue
-
-            last_dht_read = time.ticks_ms()
-
-        if time.ticks_diff(time.ticks_ms(), last_oled_update) >= 1000:
-            oled_display.clear()
-            oled_display.draw_header()
-            oled_display.draw_temperature(temp_c)
-            oled_display.draw_humidity(hum)
-            oled_display.show()
-            last_oled_update = time.ticks_ms()
-
-        # Sinalização visual via LED RGB
-        led_color = "GREEN"
-        if temp_c > 30.0 or hum < 30.0:
-            led_color = "RED"
-        elif temp_c < 18.0 or hum > 75.0:
-            led_color = "BLUE"
-        elif 18.0 <= temp_c <= 26.0 and 40.0 <= hum <= 70.0:
-            led_color = "GREEN"
-        else:
-            led_color = "YELLOW"
-
-        # Acionar os canais RGB
-        if led_color == "RED":
-            machine.Pin(16, machine.Pin.OUT).value(1)
-            machine.Pin(17, machine.Pin.OUT).value(0)
-            machine.Pin(18, machine.Pin.OUT).value(0)
-        elif led_color == "BLUE":
-            machine.Pin(16, machine.Pin.OUT).value(0)
-            machine.Pin(17, machine.Pin.OUT).value(0)
-            machine.Pin(18, machine.Pin.OUT).value(1)
-        else:
-            machine.Pin(16, machine.Pin.OUT).value(0)
-            machine.Pin(17, machine.Pin.OUT).value(1)
-            machine.Pin(18, machine.Pin.OUT).value(0)
-
-        # Telemetria via Console Serial
-        telemetry = {
-            "temp": temp_c,
-            "hum": hum,
-            "led_color": led_color
-        }
-        print(json.dumps(telemetry))
-
-if __name__ == "__main__":
-    main()
+    # RF01 – Aquisição de Dados do DHT22
+    dht_data = read_dht()
+    
+    # RF02 – Interface Gráfica no Display OLED I2C (GP4/GP5)
+    update_display(dht_data)
+    
+    # RF03 – Sinalização Visual via LED RGB (GP16, GP17, GP18)
+    set_led_color(dht_data)
+    
+    # RF04 – Telemetria via Console Serial (USB/UART)
+    send_telemetry(dht_data)
+    
+    # RNF01 – Arquitetura Não-Bloqueante
+    next_time = current_time + 2000
+    while time.ticks_diff(next_time, time.ticks_ms()) > 0:
+        pass
 ```
 
-### 2.2 Arquivo diagram.json válido para o Wokwi Pi Pico contendo todas as conexões de hardware mapeadas abaixo, pronto para execução imediata sem sobreposição de componentes
+### Diagram.json
 
 ```json
 {
   "components": [
     {
       "id": "wokwi-pi-pico",
-      "type": "wokwi-pi-pico",
-      "attrs": {}
+      "type": "wokwi-pi-pico"
     },
     {
       "id": "wokwi-dht22",
@@ -136,334 +213,229 @@ if __name__ == "__main__":
       "id": "board-ssd1306",
       "type": "board-ssd1306",
       "attrs": {
-        "i2c": "wokwi-pi-pico:i2c0",
-        "addr": 0x3c
+        "i2c_addr": 0x3c,
+        "sda_pin": 4,
+        "scl_pin": 5
       }
     },
     {
       "id": "wokwi-rgb-led",
       "type": "wokwi-rgb-led",
       "attrs": {
-        "common": "cathode",
-        "pins": [16, 17, 18]
+        "common": "cathode"
       }
     },
     {
-      "id": "wokwi-resistor",
+      "id": "wokwi-resistor_1",
       "type": "wokwi-resistor",
-      "attrs": {
-        "value": "220"
-      }
+      "value": 220
     },
     {
-      "id": "wokwi-resistor-2",
+      "id": "wokwi-resistor_2",
       "type": "wokwi-resistor",
-      "attrs": {
-        "value": "220"
-      }
+      "value": 220
     },
     {
-      "id": "wokwi-resistor-3",
+      "id": "wokwi-resistor_3",
       "type": "wokwi-resistor",
-      "attrs": {
-        "value": "220"
-      }
+      "value": 220
     }
   ],
   "connections": [
     {
       "from": "wokwi-pi-pico:3V3",
-      "to": "board-ssd1306:vcc"
+      "to": "wokwi-rgb-led:COM"
     },
     {
-      "from": "wokwi-pi-pico:gnd.2",
-      "to": "board-ssd1306:gnd"
+      "from": "wokwi-pi-pico:GND",
+      "to": "wokwi-dht22:GND.1"
     },
     {
-      "from": "wokwi-pi-pico:gp4",
-      "to": "board-ssd1306:sda"
+      "from": "wokwi-pi-pico:GND",
+      "to": "wokwi-rgb-led:GND.3"
     },
     {
-      "from": "wokwi-pi-pico:gp5",
-      "to": "board-ssd1306:scl"
+      "from": "wokwi-pi-pico:GND",
+      "to": "board-ssd1306:GND.2"
     },
     {
-      "from": "wokwi-pi-pico:gnd.3",
-      "to": "wokwi-rgb-led:com"
+      "from": "wokwi-pi-pico:GP15",
+      "to": "wokwi-dht22:SDA"
     },
     {
-      "from": "wokwi-pi-pico:gp16",
-      "to": "wokwi-rgb-led:r"
+      "from": "wokwi-pi-pico:GP4",
+      "to": "board-ssd1306:SDA"
     },
     {
-      "from": "wokwi-pi-pico:gp17",
-      "to": "wokwi-rgb-led:g"
-    },
-    {
-      "from": "wokwi-pi-pico:gp18",
-      "to": "wokwi-rgb-led:b"
+      "from": "wokwi-pi-pico:GP5",
+      "to": "board-ssd1306:SCL"
     }
   ]
 }
 ```
 
-## 3. Mapa de Hardware e Pinagem Obrigatória (Pinout RP2040)
-
-| Pino | Função |
-|------|--------|
-| GP0  | GPIO0  |
-| GP1  | GPIO1  |
-| GP2  | GPIO2  |
-| GP3  | GPIO3  |
-| GP4  | SDA    |
-| GP5  | SCL    |
-| GP6  | GPIO6  |
-| GP7  | GPIO7  |
-| GP8  | GPIO8  |
-| GP9  | GPIO9  |
-| GP10 | GPIO10 |
-| GP11 | GPIO11 |
-| GP12 | GPIO12 |
-| GP13 | GND.1  |
-| GP14 | VCC    |
-| GP15 | SDA    |
-| GP16 | R      |
-| GP17 | G      |
-| GP18 | B      |
-| GP19 | GPIO19 |
-| GP20 | GPIO20 |
-| GP21 | GPIO21 |
-| GP22 | GPIO22 |
-| GP23 | GPIO23 |
-| GP24 | GPIO24 |
-| GP25 | GPIO25 |
-| GP26 | GND.2  |
-| GP27 | VCC    |
-
-## 4. Requisitos Funcionais (RF)
-
-### RF01 – Aquisição de Dados do DHT22
-- Ler o sensor DHT22 conectado ao GP15 a cada 2.000 ms (respeitando o intervalo mínimo de amostragem do sensor).
-
-### RF02 – Interface Gráfica no Display OLED I2C (GP4/GP5)
-- Atualizar o display OLED SSD1306 (128x64 pixels, endereço I2C 0x3c) a cada 1.000 ms sem causar cintilação excessiva.
-- O layout de tela deve seguir rigorosamente 3 linhas de texto:
-  * Linha 1 (Cabeçalho): Exibir exatamente o texto "MBA -FIA" centralizado ou alinhado no topo (y=0), seguido de uma linha horizontal divisória (y=12).
-  * Linha 2: Exibir a temperatura atualizada.
-  * Linha 3: Exibir a humidade atualizada.
-
-### RF03 – Sinalização Visual via LED RGB
-- Acionar os canais RGB com base nas condições de temperatura e humidade:
-  - Se a temperatura for maior que 30°C ou a humidade menor que 30%, o LED deve ficar vermelho.
-  - Se a temperatura for menor que 18°C ou a humidade maior que 75%, o LED deve ficar azul.
-  - Caso contrário, se a temperatura estiver entre 18°C e 26°C e a humidade entre 40% e 70%, o LED deve ficar verde.
-  - Se nenhuma das condições acima for atendida, o LED deve ficar amarelo.
-
-### RF04 – Telemetria via Console Serial
-- Exibir os dados de temperatura, humidade e cor do LED no console serial a cada atualização da interface gráfica.
-
-## 5. Requisitos Adicionais
-
-### 5.1 Modularização do Código
-- O código deve ser modularizado para facilitar a manutenção e reutilização.
-
-### 5.2 Tratamento de Erros
-- O código deve tratar erros de comunicação com o sensor DHT22 e atualizar o display e o LED corretamente.
-
-### 5.3 Conexões I2C
-- As conexões I2C devem ser feitas corretamente para que o display OLED funcione adequadamente.
-
-## 6. Requisitos de Desenvolvimento
-
-### 6.1 Tecnologias Utilizadas
-- Python
-- MicroPython
-- DHT22
-
 ---
 
-## 🏗️ 2. Arquiteto de Sistemas (Design Técnico)
-
-### Mapeamento de Objetos MicroPython
-
-- **DHT22 Sensor**: `dht.DHT22(Pin(15))`
-- **ADC (Luminosidade)**: `ADC(Pin(26))` e `ADC(Pin(27))`
-- **I2C Interface**: `I2C(0, sda=Pin(4), scl=Pin(5))`
-- **SSD1306 OLED Display**: `SSD1306_I2C(128, 64, i2c)`
-- **LED RGB Channels**: `Pin(16, Pin.OUT)`, `Pin(17, Pin.OUT)`, `Pin(18, Pin.OUT)`
-- **PWM Servo Control**: `PWM(Pin(13))` and `PWM(Pin(14), Pin.IN, Pin.PULL_UP)` with `.irq()`
-
-### Assinaturas das Funções
+## 💻 3. Desenvolvedor (MicroPython)
 
 ```python
-def read_dht22_sensor():
-    # Ler o sensor DHT22 e retornar temperatura e humidade em graus Celsius e porcentagem
-    pass
-
-def convert_adc_to_luminosity(adc_value):
-    # Converter valor ADC (0..65535) para porcentagem de luminosidade
-    pass
-
-def set_pwm_servo_duty(duty_u16):
-    # Configurar o duty cycle do PWM para controlar o servo
-    pass
-
-def update_display(temp_c, hum, led_color):
-    # Atualizar o display OLED com a temperatura, humidade e cor do LED
-    pass
-
-def handle_led_color(temp_c, hum):
-    # Determinar a cor do LED com base nas condições de temperatura e humidade
-    pass
-
-def main():
-    # Loop principal não-bloqueante para ler sensor, atualizar display e controlar LED
-    pass
-```
-
-### Fluxo do Loop Principal
-
-```python
-last_dht_read = time.ticks_ms()
-last_oled_update = time.ticks_ms()
-
-while True:
-    if time.ticks_diff(time.ticks_ms(), last_dht_read) >= 2000:
-        try:
-            temp_c, hum = read_dht22_sensor()
-        except OSError as e:
-            print("ERRO SENSOR")
-            continue
-
-        last_dht_read = time.ticks_ms()
-
-    if time.ticks_diff(time.ticks_ms(), last_oled_update) >= 1000:
-        led_color = handle_led_color(temp_c, hum)
-        update_display(temp_c, hum, led_color)
-
-        # Sinalização visual via LED RGB
-        set_pwm_servo_duty(5000)  # Example duty cycle for servo control
-
-        # Telemetria via Console Serial
-        telemetry = {
-            "temp": temp_c,
-            "hum": hum,
-            "led_color": led_color
-        }
-        print(json.dumps(telemetry))
-
-        last_oled_update = time.ticks_ms()
-```
-
-### Conexões I2C
-
-- **SDA**: `Pin(4)`
-- **SCL**: `Pin(5)`
-
----
-
-## 💻 3. Desenvolvedor Python (Código & Testes Inline)
-
-```python
-from machine import Pin, ADC, PWM, I2C, time
+import time
 import dht
-import ssd1306
-import json
+from ssd1306 import SSD1306_I2C
 
-class SSD1306_I2C:
-    def __init__(self, i2c, addr):
-        self.i2c = i2c
-        self.display = ssd1306.SSD1306_I2C(128, 64, i2c, addr)
+# Inicialização dos periféricos
+dht_sensor = DHT22(machine.Pin(15))
+display = SSD1306_I2C(128, 64, machine.I2C(scl=machine.Pin(5), sda=machine.Pin(4)))
+led_r = Pin(16, Pin.OUT)
+led_g = Pin(17, Pin.OUT)
+led_b = Pin(18, Pin.OUT)
 
-    def clear(self):
-        self.display.fill(0)
-        self.display.show()
+# Funções
+def read_dht():
+    try:
+        dht_sensor.measure()
+        temp = dht_sensor.temperature()
+        hum = dht_sensor.humidity()
+        return {"temp": temp, "hum": hum}
+    except OSError:
+        return {"temp": None, "hum": None}
 
-    def draw_header(self):
-        self.display.text("MBA -FIA", 0, 0, 1)
-        self.display.hline(0, 12, 128, 1)
+def update_display(data):
+    display.fill(0)
+    display.text("MBA-FIAP", 16, 0, 1)
+    display.line(0, 12, 128, 12, 1)
+    if data["temp"] is not None and data["hum"] is not None:
+        display.text(f"Temp: {data['temp']:.1f} C", 16, 24, 1)
+        display.text(f"Hum: {data['hum']:.1f}%", 16, 42, 1)
+    else:
+        display.text("ERRO SENSOR", 16, 24, 1)
+        display.text("ERRO SENSOR", 16, 42, 1)
+    display.show()
 
-    def draw_temperature(self, temp):
-        self.display.text(f"Temp: {temp:.1f} C", 0, 24, 1)
+def set_led_color(data):
+    if data["temp"] is not None and data["hum"] is not None:
+        temp = data["temp"]
+        hum = data["hum"]
+        if temp < 15 or hum > 60:
+            led_r.value(1)
+            led_g.value(0)
+            led_b.value(0)
+        elif temp >= 20 and temp <= 30 and hum >= 40 and hum <= 70:
+            led_r.value(0)
+            led_g.value(1)
+            led_b.value(0)
+        else:
+            led_r.value(1)
+            led_g.value(1)
+            led_b.value(0)
+    else:
+        led_r.value(1)
+        led_g.value(0)
+        led_b.value(1)
 
-    def draw_humidity(self, hum):
-        self.display.text(f"Umid: {hum:.1f} %", 0, 42, 1)
+def send_telemetry(data):
+    print(json.dumps(data))
 
-def main():
-    i2c = I2C(0, sda=Pin(4), scl=Pin(5))
-    dht_sensor = dht.DHT22(Pin(15))
-    oled_display = SSD1306_I2C(i2c, 0x3c)
+# Estrutura do loop principal
+while True:
+    current_time = time.ticks_ms()
     
-    led_verde = Pin(16, Pin.OUT)
-    led_amarelo = PWM(Pin(17), freq=1000)
-    led_vermelho = Pin(18, Pin.OUT)
+    # RF01 – Aquisição de Dados do DHT22
+    dht_data = read_dht()
+    
+    # RF02 – Interface Gráfica no Display OLED I2C (GP4/GP5)
+    update_display(dht_data)
+    
+    # RF03 – Sinalização Visual via LED RGB (GP16, GP17, GP18)
+    set_led_color(dht_data)
+    
+    # RF04 – Telemetria via Console Serial (USB/UART)
+    send_telemetry(dht_data)
+    
+    # RNF01 – Arquitetura Não-Bloqueante
+    next_time = current_time + 2000
+    while time.ticks_diff(next_time, time.ticks_ms()) > 0:
+        pass
+```
 
-    button = Pin(14, Pin.IN, Pin.PULL_UP)
-    last_button_state = button.value()
-    debounce_time = 50
-
-    temperature = 25.0
-    setpoint = 23.0
-    tela_atual = 0
-
-    def read_dht22_sensor():
-        try:
-            dht_sensor.measure()
-            return dht_sensor.temperature(), dht_sensor.humidity()
-        except OSError as e:
-            print("ERRO SENSOR")
-            return None, None
-
-    def convert_adc_to_luminosity(adc_value):
-        # Example conversion logic
-        return adc_value / 65535 * 100
-
-    def set_pwm_servo_duty(duty_u16):
-        # Example duty cycle for servo control
-        led_verde.value(0)
-        led_amarelo.duty_u16(duty_u16)
-
-    def update_display(temp_c, hum, led_color):
-        oled_display.clear()
-        oled_display.draw_header()
-        if temp_c is not None and hum is not None:
-            oled_display.draw_temperature(temp_c)
-            oled_display.draw_humidity(hum)
-        else:
-            oled_display.draw_temperature("N/A")
-            oled_display.draw_humidity("N/A")
-
-    def handle_led_color(temp_c, hum):
-        if temp_c > 30 or hum < 30:
-            led_vermelho.value(1)
-        elif temp_c < 18 or hum > 75:
-            led_verde.value(0)
-            led_amarelo.duty_u16(2048)  # Example duty cycle for blue
-        else:
-            led_verde.value(1)
-            led_amarelo.duty_u16(1024)   # Example duty cycle for green
-
-    def button_pressed():
-        nonlocal tela_atual, last_button_state
-        current_time = time.ticks_ms()
-        if current_time - last_button_state > debounce_time:
-            tela_atual = 1 - tela_atual
-            last_button_state = current_time
-
-    while True:
-        if button.value() != last_button_state:
-            button_pressed()
-
-        if tela_atual == 0:
-            temp_c, hum = read_dht22_sensor()
-            handle_led_color(temp_c, hum)
-            update_display(temp_c, hum, "Verde" if led_verde.value() else "Amarelo")
-        elif tela_atual == 1:
-            # Diagnóstico mode
-            print("Diagnóstico Mode")
-
-        time.sleep(0.5)
-
-if __name__ == "__main__":
-    main()
+```json
+{
+  "version": 1,
+  "author": "EdgeAI",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "id": "wokwi-pi-pico",
+      "type": "wokwi-pi-pico"
+    },
+    {
+      "id": "wokwi-dht22",
+      "type": "wokwi-dht22",
+      "attrs": {
+        "pin": 15
+      }
+    },
+    {
+      "id": "board-ssd1306",
+      "type": "board-ssd1306",
+      "attrs": {
+        "i2c_addr": 0x3c,
+        "sda_pin": 4,
+        "scl_pin": 5
+      }
+    },
+    {
+      "id": "wokwi-rgb-led",
+      "type": "wokwi-rgb-led",
+      "attrs": {
+        "common": "cathode"
+      }
+    },
+    {
+      "id": "wokwi-resistor_1",
+      "type": "wokwi-resistor",
+      "value": 220
+    },
+    {
+      "id": "wokwi-resistor_2",
+      "type": "wokwi-resistor",
+      "value": 220
+    },
+    {
+      "id": "wokwi-resistor_3",
+      "type": "wokwi-resistor",
+      "value": 220
+    }
+  ],
+  "connections": [
+    {
+      "from": "wokwi-pi-pico:3V3",
+      "to": "wokwi-rgb-led:COM"
+    },
+    {
+      "from": "wokwi-pi-pico:GND",
+      "to": "wokwi-dht22:GND.1"
+    },
+    {
+      "from": "wokwi-pi-pico:GND",
+      "to": "wokwi-rgb-led:GND.3"
+    },
+    {
+      "from": "wokwi-pi-pico:GND",
+      "to": "board-ssd1306:GND.2"
+    },
+    {
+      "from": "wokwi-pi-pico:GP15",
+      "to": "wokwi-dht22:SDA"
+    },
+    {
+      "from": "wokwi-pi-pico:GP4",
+      "to": "board-ssd1306:SDA"
+    },
+    {
+      "from": "wokwi-pi-pico:GP5",
+      "to": "board-ssd1306:SCL"
+    }
+  ]
+}
 ```

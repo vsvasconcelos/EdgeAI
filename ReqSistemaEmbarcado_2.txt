@@ -1,0 +1,62 @@
+Atue como um Engenheiro de Sistemas Embarcados Sênior. Implemente a especificação abaixo para Raspberry Pi Pico utilizando micropython. Entregue: (1) a estrutura de arquivos do projeto com código limpo, comentado no padrão PEP-8, modular e não-bloqueante; e (2) o arquivo diagram.json completo e pronto para rodar sem ajustes no simulador Wokwi (wokwi-pi-pico). Respeite rigorosamente cada pino GPIO, ADC, PWM e I2C definidos na tabela de hardware.
+
+Especificação de Requisitos: Controlador de Borda para Estufa (Raspberry Pi Pico)
+
+1. Stack e Entregáveis Esperados do Agente
+
+Plataforma Alvo: Raspberry Pi Pico (RP2040).
+Linguagem / SDK: micropython.
+Artefatos de Saída:
+
+1. Código-fonte completo, modularizado e comentado.
+2. Arquivo diagram.json válido para o Wokwi Pi Pico contendo todas as conexões de hardware mapeadas abaixo, pronto para execução imediata.
+3. Mapa de Hardware e Pinagem Obrigatória (Pinout RP2040)
+
+Todos os componentes abaixo existem nativamente na paleta do Wokwi e devem ser conectados estritamente nos pinos especificados:
+
+Componente (Wokwi ID) | Função no Sistema | Interface | Pinos Obrigatórios no Pi Pico
+Sensor DHT22 (wokwi-dht22) | Leitura de Temperatura (°C) e Umidade (%) | Digital (1-Wire) | DATA -> GP15
+Fotoresistor / LDR (wokwi-photoresistor-sensor) | Leitura de Luminosidade (0 a 100%) | Analógica (ADC0) | AO -> GP26 (ADC0)
+Potenciômetro (wokwi-potentiometer) | Ajuste manual do Setpoint de Temperatura (15°C a 40°C) | Analógica (ADC1) | SIG -> GP27 (ADC1)
+Display OLED SSD1306 (wokwi-ssd1306, 128x64) | Interface local (telemetria, setpoint e status) | I2C0 | SDA -> GP4, SCL -> GP5
+LED Verde (wokwi-led) | Indicador de sistema operando em faixa normal | Digital Out | Anodo -> GP16 (com resistor 220 ohms)
+LED Amarelo (wokwi-led) | Alerta de baixa luminosidade (aciona iluminação auxiliar) | PWM Out | Anodo -> GP17 (com resistor 220 ohms)
+LED Vermelho (wokwi-led) | Alarme crítico de superaquecimento / falha de sensor | Digital Out | Anodo -> GP18 (com resistor 220 ohms)
+Servo Motor (wokwi-servo) | Atuador de abertura da janela de ventilação (0° a 90°) | PWM Out | PWM -> GP13
+Pushbutton (wokwi-pushbutton) | Botão de alternância de tela no OLED / Silenciar alarme | Digital In (IRQ) | Pino -> GP14 (Pull-up interno)
+
+3. Requisitos Funcionais (RF)
+
+RF01 – Aquisição de Sensores e Escalonamento:
+Ler o DHT22 (GP15) a cada 2.000 ms (respeitando o tempo mínimo de amostragem do sensor).
+Ler o LDR (GP26) e o Potenciômetro (GP27) a cada 200 ms, aplicando conversão de leitura ADC (16 bits no MicroPython: 0–65535) para:
+Luminosidade: 0% (escuro) a 100% (luz máxima).
+Setpoint de Temperatura: mapeamento linear de 15.0°C a 40.0°C.
+
+RF02 – Controle Proporcional de Ventilação (Servo Motor - GP13):
+Comparar a Temperatura Atual (T_atual) com o Setpoint (T_set):
+Se T_atual <= T_set: Servo fechado em 0°.
+Se T_atual > T_set: Abrir a janela proporcionalmente entre 0° e 90°, atingindo abertura máxima (90°) quando T_atual >= T_set + 5.0°C.
+
+RF03 – Controle PWM de Iluminação Auxiliar (LED Amarelo - GP17):
+Se a luminosidade cair abaixo de 40%, o LED Amarelo (GP17) deve ajustar seu brilho via PWM de forma inversamente proporcional à luz ambiente (quanto mais escuro, maior o duty cycle, atingindo 100% de brilho em 0% de luz). Acima de 40%, o LED permanece apagado.
+
+RF04 – Sinalização de Estado e Alarme Crítico (LEDs GP16 e GP18):
+Estado Normal (T_atual <= T_set + 5.0°C): LED Verde (GP16) aceso fixo; LED Vermelho (GP18) apagado.
+Estado Crítico (T_atual > T_set + 5.0°C): LED Verde (GP16) apaga; LED Vermelho (GP18) pisca a 2 Hz (250 ms ligado / 250 ms desligado).
+
+RF05 – Interface Gráfica no Display OLED I2C (GP4/GP5):
+Atualizar o display a cada 500 ms sem causar cintilação (flicker).
+O botão no GP14 (configurado com Interrupção de Hardware / IRQ na borda de descida e debounce por software de 200 ms) deve alternar entre 2 telas:
+Tela 1 (Operação): Exibe Temp, Umid, Luz (%), Setpoint e ângulo atual do Servo.
+Tela 2 (Diagnóstico): Exibe estado textual (NORMAL ou ALERTA CRITICO), valores brutos dos ADCs e tempo de atividade (uptime em segundos).
+
+RF06 – Telemetria Estruturada via Serial (USB/UART):
+Imprimir no console serial do Wokwi, a cada 2 segundos, uma linha JSON compacta contendo o estado completo do nó:
+{"uptime_s": 12, "temp": 28.4, "hum": 62.0, "setpoint": 25.0, "light_pct": 32, "servo_deg": 61, "alarm": false}
+
+4. Requisitos Não Funcionais (RNF)
+
+RNF01 – Arquitetura Não-Bloqueante: Proibido o uso de time.sleep() longo no loop principal. O piscar do LED vermelho (2 Hz), a leitura do DHT22 (0.5 Hz), a leitura dos ADCs (5 Hz) e a atualização do OLED (2 Hz) devem ser escalonados por temporizadores não-bloqueantes (time.ticks_ms() / ticks_diff() ou uasyncio).
+RNF02 – Tratamento de Falha de Sensor: Caso a leitura do DHT22 lance exceção (OSError), o sistema não pode travar; deve registrar "temp": null no JSON, exibir "ERRO DHT22" no OLED e piscar o LED Vermelho.
+RNF03 – Fidelidade do diagram.json: O arquivo diagram.json gerado pelo agente deve conectar explicitamente GND e 3V3/VBUS de todos os periféricos, incluir resistores limitadores de corrente nos LEDs e usar os nomes exatos dos pinos do wokwi-pi-pico (GP4, GP5, GP13, GP14, GP15, GP16, GP17, GP18, GP26, GP27).

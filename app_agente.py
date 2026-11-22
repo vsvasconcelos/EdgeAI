@@ -30,11 +30,16 @@
 #    [GP: Escopo] → [Arquiteto: Design] → [Desenvolvedor: Código+Diagrama]
 # =============================================================================
 
+import ast
+import io
 import json
 import os
 import re
+import subprocess
 import sys
 import time
+import traceback
+import types
 import requests
 import warnings
 from datetime import datetime
@@ -56,9 +61,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 console = Console(stderr=True)
 
-OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_MODEL    = "qwen2.5-coder:3b"
-CONTEXT_WINDOW  = 4096   # Travado — evita crash de VRAM na MX110
+OLLAMA_BASE_URL   = "http://localhost:11434"
+OLLAMA_MODEL      = "qwen2.5-coder:3b"
+CONTEXT_WINDOW    = 4096   # Travado — evita crash de VRAM na MX110
+MAX_TENTATIVAS_QA = 3      # Limite de iterações do Loop Dinâmico de Auto-Correção
 
 
 # =============================================================================
@@ -366,10 +372,11 @@ def executar_pipeline_wokwi(llm: ChatOllama, pedido_usuario: str) -> tuple[str, 
 
     if linguagem == "MicroPython":
         diretriz_sdk = (
-            "Linguagem: MicroPython nativo (`from machine import ...`, `import time`, `import json`). "
-            "Se houver DHT22/DHT11 use `import dht` com `.measure()`, `.temperature()` e `.humidity()`. "
-            "Se houver OLED SSD1306 use `from ssd1306 import SSD1306_I2C`. "
-            "Use temporização não-bloqueante com `time.ticks_ms()` e `time.ticks_diff()`. "
+            "Linguagem: MicroPython nativo para RP2040/ESP32. "
+            "SEMPRE inclua no topo todos os imports usados: `import machine`, `from machine import Pin, I2C`, `import time`, `import json`. "
+            "Se houver DHT22/DHT11: faça `import dht` e instancie OBRIGATORIAMENTE com prefixo do módulo `dht.DHT22(Pin(15))` (NUNCA use `DHT22(...)` sem `dht.`), lendo com `.measure()`, `.temperature()` e `.humidity()`. "
+            "Se houver OLED SSD1306: use `from ssd1306 import SSD1306_I2C` e inicialize o I2C informando o ID do barramento 0: `I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)`. "
+            "Use temporização não-bloqueante com `time.ticks_ms()`, `time.ticks_diff()` e `time.sleep_ms(50)` no fim do loop. "
             "PROIBIDO importar `Adafruit_*`, `board`, `digitalio` ou `wokwi_gpio`."
         )
     elif "Arduino" in linguagem:
@@ -423,17 +430,17 @@ def executar_pipeline_wokwi(llm: ChatOllama, pedido_usuario: str) -> tuple[str, 
         system_prompt=(
             f"Você é um Arquiteto de Firmware Sênior para {board_nome} (`{board_type}`) em {linguagem} no Wokwi. "
             f"Sua função é definir APENAS a especificação técnica e as assinaturas das funções para `{arq_codigo}`. "
-            f"NÃO implemente o código final completo nesta etapa. "
+            f"NÃO escreva blocos de código implementados e NUNCA altere os limiares numéricos ou textos do escopo. "
             f"{regra_isolamento}\n"
             f"{diretriz_sdk}"
         ),
         user_prompt=(
             f"Com base no escopo abaixo, especifique a arquitetura técnica em {linguagem} para {board_nome} no Wokwi.\n\n"
             f"=== ESCOPO ===\n{escopo}\n\n"
-            f"Liste de forma concisa (máximo 180 palavras, SEM implementar o código completo):\n"
-            f"1. Inicialização APENAS dos periféricos e pinos presentes no escopo (NÃO adicione servo, ADC ou botões se não estiverem no escopo)\n"
-            f"2. Assinaturas das funções e regras exatas de negócio/prioridade definidas no escopo\n"
-            f"3. Estrutura do loop principal não-bloqueante respeitando os intervalos em milissegundos do escopo."
+            f"Liste de forma concisa (máximo 200 palavras, SEM escrever blocos de código implementados):\n"
+            f"1. Imports obrigatórios e inicialização APENAS dos periféricos e pinos presentes no escopo (`dht.DHT22(Pin(...))`, `I2C(0, scl=Pin(...), sda=Pin(...))`, `Pin(..., Pin.OUT)`)\n"
+            f"2. Assinaturas das funções preservando EXATAMENTE todas as faixas numéricas de temperatura/umidade, textos do OLED e chaves do JSON serial definidos no escopo\n"
+            f"3. Estrutura de estado do loop principal não-bloqueante com `time.ticks_ms()` e `time.ticks_diff()` respeitando cada intervalo independente em ms."
         ),
     )
 
@@ -445,23 +452,27 @@ def executar_pipeline_wokwi(llm: ChatOllama, pedido_usuario: str) -> tuple[str, 
         system_prompt=(
             f"Você é um Desenvolvedor Sênior de Sistemas Embarcados para {board_nome} (`{board_type}`) em {linguagem} no Wokwi. "
             f"Sua tarefa é escrever:\n"
-            f"1) O código completo do arquivo `{arq_codigo}` dentro de um único bloco ```{bloco_md} ... ```.\n"
+            f"1) O código completo, funcional e sem erros de importação do arquivo `{arq_codigo}` dentro de um único bloco ```{bloco_md} ... ```.\n"
             f"2) Em seguida, o arquivo `diagram.json` válido do Wokwi dentro de um bloco ```json ... ```.\n"
             f"{regra_isolamento}\n"
             f"{diretriz_sdk}"
         ),
         user_prompt=(
             f"Escreva agora o código COMPLETO de `{arq_codigo}` em {linguagem} para {board_nome} (`{board_type}`) "
-            f"e o `diagram.json` correspondente no Wokwi, seguindo rigorosamente o pedido e a arquitetura abaixo:\n\n"
+            f"e o `diagram.json` correspondente no Wokwi, seguindo rigorosamente o PEDIDO ORIGINAL abaixo:\n\n"
             f"=== PEDIDO ORIGINAL ===\n{pedido_usuario}\n\n"
             f"=== ARQUITETURA ===\n{arquitetura}\n\n"
             f"REGRAS OBRIGATÓRIAS:\n"
+            f"- Inclua todos os imports no topo (`import machine`, `from machine import Pin, I2C`, `import dht`, `import time`, `import json`, `from ssd1306 import SSD1306_I2C`).\n"
+            f"- Instancie o DHT22 como `dht.DHT22(Pin(15))` e o I2C0 como `I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)`.\n"
             f"- Implemente SOMENTE os componentes e pinos do pedido (NÃO adicione servo, LDR, potenciômetro ou botão se não foram pedidos).\n"
-            f"- Respeite exatamente os textos de display, limiares de temperatura/umidade, cores de LED e formato JSON serial especificados.\n"
+            f"- Respeite EXATAMENTE os textos de display (`MBA-FIAP`, `Temp: XX.X C`, `Umid: XX.X %`, `ERRO SENSOR`), todas as 4 faixas de temperatura/umidade e cores do LED RGB (`RED`, `BLUE`, `GREEN`, `YELLOW`, e `MAGENTA` em erro) e o formato JSON serial (`{{\"temp\": ..., \"hum\": ..., \"led_color\": ...}}`) do PEDIDO ORIGINAL.\n"
+            f"- Use escalonamento não-bloqueante real com dois contadores (`last_dht` para 2000 ms e `last_oled` para 1000 ms) usando `time.ticks_ms()` e `time.ticks_diff()`.\n"
             f"- Entregue primeiro o bloco ```{bloco_md} ... ``` com o código completo de `{arq_codigo}`.\n"
             f"- Depois entregue o bloco ```json ... ``` com o `diagram.json` no formato oficial Wokwi (`\"version\": 1, \"author\": \"EdgeAI\", \"editor\": \"wokwi\", \"parts\": [...], \"connections\": [...]`)."
         ),
     )
+    codigo = executar_loop_qa_e_correcao(llm, pedido_usuario, escopo, arquitetura, codigo)
     return escopo, arquitetura, codigo
 
 
@@ -555,26 +566,789 @@ def executar_pipeline(llm: ChatOllama, pedido_usuario: str) -> tuple[str, str, s
         ),
     )
 
+    codigo = executar_loop_qa_e_correcao(llm, pedido_usuario, escopo, arquitetura, codigo)
     return escopo, arquitetura, codigo
+
+
+MAPA_SIMBOLOS_MICROPYTHON = {
+    "machine": "import machine",
+    "Pin": "from machine import Pin",
+    "I2C": "from machine import I2C",
+    "SoftI2C": "from machine import SoftI2C",
+    "SPI": "from machine import SPI",
+    "SoftSPI": "from machine import SoftSPI",
+    "PWM": "from machine import PWM",
+    "ADC": "from machine import ADC",
+    "UART": "from machine import UART",
+    "Timer": "from machine import Timer",
+    "RTC": "from machine import RTC",
+    "WDT": "from machine import WDT",
+    "time_pulse_us": "from machine import time_pulse_us",
+    "dht": "import dht",
+    "DHT22": "from dht import DHT22",
+    "DHT11": "from dht import DHT11",
+    "SSD1306_I2C": "from ssd1306 import SSD1306_I2C",
+    "SSD1306_SPI": "from ssd1306 import SSD1306_SPI",
+    "OneWire": "from onewire import OneWire",
+    "DS18X20": "from ds18x20 import DS18X20",
+    "NeoPixel": "from neopixel import NeoPixel",
+    "const": "from micropython import const",
+    "micropython": "import micropython",
+    "framebuf": "import framebuf",
+    "time": "import time",
+    "utime": "import time as utime",
+    "json": "import json",
+    "ujson": "import json as ujson",
+    "math": "import math",
+    "random": "import random",
+    "urandom": "import random as urandom",
+    "struct": "import struct",
+    "ustruct": "import struct as ustruct",
+    "sys": "import sys",
+    "gc": "import gc",
+}
+
+
+def extrair_bloco_codigo(codigo: str, arquitetura: str = "") -> str:
+    """Extrai o bloco principal de código-fonte da resposta do agente Desenvolvedor."""
+    blocos_cod = re.findall(
+        r"```(?:python|cpp|c\+\+|c|ino|arduino)\s*(.*?)\s*```",
+        f"{codigo}\n{arquitetura}",
+        re.DOTALL | re.IGNORECASE,
+    )
+    if not blocos_cod:
+        blocos_cod = [
+            b
+            for b in re.findall(r"```\s*(.*?)\s*```", codigo, re.DOTALL)
+            if not b.strip().startswith("{")
+        ]
+    if blocos_cod:
+        return max(blocos_cod, key=len).strip()
+    return codigo.strip()
+
+
+def analisar_ast_codigo_python(codigo_limpo: str) -> dict:
+    """Analisa estaticamente a AST do código Python/MicroPython (SyntaxError e nomes indefinidos)."""
+    try:
+        arvore = ast.parse(codigo_limpo)
+    except SyntaxError as e:
+        return {
+            "ok": False,
+            "erro_sintaxe": f"SyntaxError na linha {e.lineno}: {e.msg}",
+            "indefinidos": [],
+        }
+
+    import builtins
+    definidos = set(dir(builtins))
+    definidos.update({"__name__", "__file__", "__doc__", "self", "cls"})
+    usados = {}
+
+    for node in ast.walk(arvore):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                definidos.add((alias.asname or alias.name).split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name != "*":
+                    definidos.add(alias.asname or alias.name)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            definidos.add(node.name)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for arg in node.args.args + node.args.posonlyargs + node.args.kwonlyargs:
+                    definidos.add(arg.arg)
+                if node.args.vararg:
+                    definidos.add(node.args.vararg.arg)
+                if node.args.kwarg:
+                    definidos.add(node.args.kwarg.arg)
+        elif isinstance(node, ast.Lambda):
+            for arg in node.args.args + node.args.posonlyargs + node.args.kwonlyargs:
+                definidos.add(arg.arg)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            definidos.add(node.name)
+        elif isinstance(node, ast.comprehension):
+            for t in ast.walk(node.target):
+                if isinstance(t, ast.Name):
+                    definidos.add(t.id)
+        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            definidos.add(node.target.id)
+        elif isinstance(node, ast.Name):
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                definidos.add(node.id)
+            elif isinstance(node.ctx, ast.Load):
+                usados.setdefault(node.id, getattr(node, "lineno", 0))
+
+    indefinidos = [
+        (nome, linha)
+        for nome, linha in sorted(usados.items(), key=lambda x: x[1])
+        if nome not in definidos
+    ]
+    return {"ok": len(indefinidos) == 0, "erro_sintaxe": None, "indefinidos": indefinidos}
+
+
+def _inferir_barramento_i2c_rp2040(match_i2c: re.Match) -> str:
+    """Infere o ID do barramento I2C (0 ou 1) no RP2040 a partir dos pinos SDA/SCL."""
+    prefixo = match_i2c.group(1)
+    args = match_i2c.group(2)
+    pinos_i2c1_sda = {2, 6, 10, 14, 18, 26}
+    pinos_i2c1_scl = {3, 7, 11, 15, 19, 27}
+    m_sda = re.search(r"sda\s*=\s*(?:machine\.)?Pin\s*\(\s*(\d+)", args)
+    m_scl = re.search(r"scl\s*=\s*(?:machine\.)?Pin\s*\(\s*(\d+)", args)
+    bus_id = 0
+    if (m_sda and int(m_sda.group(1)) in pinos_i2c1_sda) or (
+        m_scl and int(m_scl.group(1)) in pinos_i2c1_scl
+    ):
+        bus_id = 1
+    return f"{prefixo}{bus_id}, {args}"
 
 
 def sanitizar_codigo_micropython(codigo: str) -> str:
     """
-    Corrige deslizes comuns de geração de LLMs para MicroPython no Wokwi:
-    - Garante chamada de método em .temperature() e .humidity() do módulo dht.
-    - Garante instância de dht_sensor = dht.DHT22(Pin(15)) e tela_atual = 0.
+    Normaliza e corrige deslizes de geração de LLMs para MicroPython no Wokwi:
+    - Garante parênteses em .temperature() e .humidity() do módulo dht.
+    - Corrige DHT22(...) / DHT11(...) desqualificados para dht.DHT22(...) / dht.DHT11(...).
+    - Infere automaticamente o ID do barramento I2C (0 ou 1) no RP2040 quando omitido.
+    - Analisa a AST do código e injeta automaticamente qualquer import nativo ausente.
     """
     codigo = re.sub(r"(\bdht\w*\.temperature)(?!\s*\()", r"\1()", codigo)
     codigo = re.sub(r"(\bdht\w*\.humidity)(?!\s*\()", r"\1()", codigo)
+
+    if not re.search(r"from\s+dht\s+import\s+.*?\bDHT(?:22|11)\b", codigo):
+        codigo = re.sub(r"(?<![.\w])(DHT(?:22|11))\s*\(", r"dht.\1(", codigo)
+
+    codigo = re.sub(
+        r"(\bI2C\s*\()(\s*(?:scl|sda)\s*=[^)]+)",
+        _inferir_barramento_i2c_rp2040,
+        codigo,
+    )
+
+    analise = analisar_ast_codigo_python(codigo)
+    imports_para_injetar = []
+
+    for nome_indef, _ in analise.get("indefinidos", []):
+        if nome_indef in MAPA_SIMBOLOS_MICROPYTHON:
+            stmt = MAPA_SIMBOLOS_MICROPYTHON[nome_indef]
+            if stmt not in imports_para_injetar and stmt not in codigo:
+                imports_para_injetar.append(stmt)
+
+    for padrao_mod, stmt_mod in (
+        (r"\bmachine\.", "import machine"),
+        (r"\bdht\.", "import dht"),
+        (r"\bjson\.", "import json"),
+        (r"\btime\.", "import time"),
+    ):
+        if re.search(padrao_mod, codigo) and not re.search(rf"^\s*{stmt_mod}\b", codigo, re.MULTILINE):
+            if stmt_mod not in imports_para_injetar:
+                imports_para_injetar.append(stmt_mod)
+
+    if imports_para_injetar:
+        codigo = "\n".join(imports_para_injetar) + "\n" + codigo
+
     if "dht_sensor" in codigo and not re.search(r"^\s*dht_sensor\s*=", codigo, re.MULTILINE):
-        codigo = codigo.replace(
-            "import dht",
-            "import dht\ndht_sensor = dht.DHT22(Pin(15))",
-            1,
-        )
+        codigo = codigo.replace("import dht", "import dht\ndht_sensor = dht.DHT22(Pin(15))", 1)
     if "tela_atual" in codigo and not re.search(r"^\s*tela_atual\s*=", codigo, re.MULTILINE):
         codigo = "tela_atual = 0\n" + codigo
     return codigo
+
+
+class _FimSimulacaoSandbox(BaseException):
+    """Exceção interna (BaseException) para encerrar o while True do Sandbox após N ciclos."""
+
+
+def executar_sandbox_micropython(codigo_limpo: str, board_id: str = "pico") -> dict:
+    """
+    Executa o código MicroPython em um Sandbox Real em memória que simula o
+    firmware MicroPython v1.29 (RP2040 / ESP32):
+    - Testa inicialização de Pin, I2C (validando id 0/1 no RP2040), PWM, ADC, DHT22/11 e SSD1306.
+    - Executa múltiplos ciclos do loop principal avançando ticks_ms() automaticamente.
+    - Simula leituras normais do DHT22 e injeta 1 falha OSError para validar resiliência (RNF02).
+    """
+    pinos_usados = set()
+    textos_oled = []
+    relogio_ms = [0]
+    chamadas_ticks = [0]
+    chamadas_sleep = [0]
+    leituras_dht = [0]
+
+    modulos_mock_nomes = (
+        "machine", "dht", "ssd1306", "framebuf", "micropython",
+        "onewire", "ds18x20", "neopixel", "utime", "ujson",
+    )
+    backup_sys_modules = {m: sys.modules.get(m) for m in modulos_mock_nomes}
+    backup_time_attrs = {
+        a: getattr(time, a)
+        for a in ("ticks_ms", "ticks_us", "ticks_diff", "ticks_add", "sleep", "sleep_ms", "sleep_us")
+        if hasattr(time, a)
+    }
+
+    class MockPin:
+        IN, OUT, OPEN_DRAIN = 0, 1, 2
+        PULL_UP, PULL_DOWN = 1, 2
+        IRQ_RISING, IRQ_FALLING = 1, 2
+
+        def __init__(self, pin_id, mode=-1, pull=-1, value=0):
+            if isinstance(pin_id, int):
+                pinos_usados.add(f"GP{pin_id}" if board_id == "pico" else str(pin_id))
+            elif isinstance(pin_id, str):
+                pinos_usados.add(pin_id.upper())
+            self.id = pin_id
+            self._val = value
+
+        def value(self, x=None):
+            if x is None:
+                return self._val
+            self._val = int(bool(x))
+
+        def on(self):
+            self._val = 1
+
+        def off(self):
+            self._val = 0
+
+        def irq(self, handler=None, trigger=3):
+            return None
+
+    class MockI2C:
+        def __init__(self, *args, **kwargs):
+            if board_id == "pico" and (not args or not isinstance(args[0], int)):
+                raise TypeError(
+                    "I2C() no Raspberry Pi Pico (RP2040) exige o ID do barramento (0 ou 1) "
+                    "como primeiro argumento posicional: I2C(0, scl=Pin(5), sda=Pin(4))"
+                )
+            self.args = args
+            self.kwargs = kwargs
+
+        def scan(self):
+            return [0x3C, 0x27]
+
+        def writeto(self, addr, buf, stop=True):
+            return len(buf)
+
+        def writevto(self, addr, vector, stop=True):
+            return sum(len(b) for b in vector if b)
+
+        def writeto_mem(self, addr, memaddr, buf):
+            return None
+
+        def readfrom_mem(self, addr, memaddr, nbytes):
+            return bytes(nbytes)
+
+    class MockPWM:
+        def __init__(self, pin, freq=50, duty_u16=0):
+            self.pin = pin
+            self._freq = freq
+            self._duty_u16 = duty_u16
+            self._duty = 0
+
+        def freq(self, val=None):
+            if val is None:
+                return self._freq
+            self._freq = val
+
+        def duty_u16(self, val=None):
+            if val is None:
+                return self._duty_u16
+            self._duty_u16 = val
+
+        def duty(self, val=None):
+            if val is None:
+                return self._duty
+            self._duty = val
+
+        def deinit(self):
+            pass
+
+    class MockADC:
+        def __init__(self, pin):
+            if isinstance(pin, int):
+                pinos_usados.add(f"GP{pin}" if board_id == "pico" else str(pin))
+            self.pin = pin
+
+        def read_u16(self):
+            return 32768
+
+        def read(self):
+            return 2048
+
+    class MockTimer:
+        ONE_SHOT, PERIODIC = 0, 1
+
+        def __init__(self, id=-1):
+            self.id = id
+
+        def init(self, mode=1, period=-1, callback=None):
+            if callable(callback):
+                callback(self)
+
+        def deinit(self):
+            pass
+
+    class MockDHTBase:
+        CENARIOS = [
+            (24.5, 55.0),
+            (32.5, 25.0),
+            (15.0, 80.0),
+            (28.0, 50.0),
+            "OSERROR",
+        ]
+
+        def __init__(self, pin):
+            self.pin = pin
+            self._temp = 24.5
+            self._hum = 55.0
+
+        def measure(self):
+            idx = leituras_dht[0]
+            leituras_dht[0] += 1
+            cenario = self.CENARIOS[idx % len(self.CENARIOS)]
+            if cenario == "OSERROR":
+                raise OSError(110, "ETIMEDOUT: Simulated DHT sensor read failure")
+            self._temp, self._hum = cenario
+
+        def temperature(self):
+            return self._temp
+
+        def humidity(self):
+            return self._hum
+
+    class MockSSD1306:
+        def __init__(self, width, height, i2c, addr=0x3C, external_vcc=False):
+            self.width, self.height, self.i2c, self.addr = width, height, i2c, addr
+
+        def fill(self, col):
+            pass
+
+        def pixel(self, x, y, col=1):
+            pass
+
+        def line(self, x1, y1, x2, y2, col=1):
+            pass
+
+        def hline(self, x, y, w, col=1):
+            pass
+
+        def vline(self, x, y, h, col=1):
+            pass
+
+        def rect(self, x, y, w, h, col=1):
+            pass
+
+        def fill_rect(self, x, y, w, h, col=1):
+            pass
+
+        def text(self, string, x, y, col=1):
+            textos_oled.append(str(string))
+
+        def show(self):
+            pass
+
+    def mock_ticks_ms():
+        chamadas_ticks[0] += 1
+        relogio_ms[0] += 500
+        if chamadas_ticks[0] > 45:
+            raise _FimSimulacaoSandbox()
+        return relogio_ms[0]
+
+    def mock_ticks_diff(end, start):
+        return int(end) - int(start)
+
+    def mock_ticks_add(ticks, delta):
+        return int(ticks) + int(delta)
+
+    def mock_sleep(segundos):
+        chamadas_sleep[0] += 1
+        relogio_ms[0] += int(float(segundos) * 1000)
+        if chamadas_sleep[0] > 8:
+            raise _FimSimulacaoSandbox()
+
+    def mock_sleep_ms(ms):
+        chamadas_sleep[0] += 1
+        relogio_ms[0] += max(int(ms), 500)
+        if chamadas_sleep[0] > 12:
+            raise _FimSimulacaoSandbox()
+
+    def mock_sleep_us(us):
+        relogio_ms[0] += 1
+
+    mod_machine = types.ModuleType("machine")
+    mod_machine.Pin = MockPin
+    mod_machine.I2C = MockI2C
+    mod_machine.SoftI2C = MockI2C
+    mod_machine.PWM = MockPWM
+    mod_machine.ADC = MockADC
+    mod_machine.Timer = MockTimer
+    mod_machine.time_pulse_us = lambda pin, level, timeout=1000000: 1500
+    mod_machine.reset = lambda: None
+    mod_machine.freq = lambda f=None: 125000000
+
+    mod_dht = types.ModuleType("dht")
+    mod_dht.DHT22 = MockDHTBase
+    mod_dht.DHT11 = MockDHTBase
+
+    mod_ssd1306 = types.ModuleType("ssd1306")
+    mod_ssd1306.SSD1306_I2C = MockSSD1306
+    mod_ssd1306.SSD1306_SPI = MockSSD1306
+    mod_ssd1306.SSD1306 = MockSSD1306
+
+    mod_micropython = types.ModuleType("micropython")
+    mod_micropython.const = lambda x: x
+
+    mod_framebuf = types.ModuleType("framebuf")
+    mod_framebuf.MONO_VLSB = 0
+    mod_framebuf.FrameBuffer = object
+
+    mod_onewire = types.ModuleType("onewire")
+    mod_onewire.OneWire = lambda pin: pin
+
+    mod_ds18x20 = types.ModuleType("ds18x20")
+    mod_ds18x20.DS18X20 = type(
+        "DS18X20", (), {
+            "__init__": lambda self, ow: None,
+            "scan": lambda self: [b"\x28\x00"],
+            "convert_temp": lambda self: None,
+            "read_temp": lambda self, rom: 25.0,
+        },
+    )
+
+    mod_neopixel = types.ModuleType("neopixel")
+    mod_neopixel.NeoPixel = type(
+        "NeoPixel", (), {
+            "__init__": lambda self, pin, n: setattr(self, "_buf", [(0, 0, 0)] * n),
+            "__setitem__": lambda self, idx, val: None,
+            "__getitem__": lambda self, idx: (0, 0, 0),
+            "write": lambda self: None,
+            "fill": lambda self, val: None,
+        },
+    )
+
+    sys.modules["machine"] = mod_machine
+    sys.modules["dht"] = mod_dht
+    sys.modules["ssd1306"] = mod_ssd1306
+    sys.modules["micropython"] = mod_micropython
+    sys.modules["framebuf"] = mod_framebuf
+    sys.modules["onewire"] = mod_onewire
+    sys.modules["ds18x20"] = mod_ds18x20
+    sys.modules["neopixel"] = mod_neopixel
+    sys.modules["utime"] = time
+    sys.modules["ujson"] = json
+
+    time.ticks_ms = mock_ticks_ms
+    time.ticks_us = lambda: relogio_ms[0] * 1000
+    time.ticks_diff = mock_ticks_diff
+    time.ticks_add = mock_ticks_add
+    time.sleep = mock_sleep
+    time.sleep_ms = mock_sleep_ms
+    time.sleep_us = mock_sleep_us
+
+    buffer_stdout = io.StringIO()
+    old_stdout = sys.stdout
+    sys.stdout = buffer_stdout
+
+    sucesso = True
+    erro_execucao = None
+    tb_resumido = ""
+
+    try:
+        ns = {"__name__": "__main__"}
+        compilado = compile(codigo_limpo, "main.py", "exec")
+        exec(compilado, ns)
+    except _FimSimulacaoSandbox:
+        sucesso = True
+    except Exception as exc:
+        sucesso = False
+        tb_linhas = traceback.format_exception(type(exc), exc, exc.__traceback__)
+        tb_filtrado = [l for l in tb_linhas if 'File "main.py"' in l or l == tb_linhas[-1]]
+        tb_resumido = "".join(tb_filtrado).strip() or f"{type(exc).__name__}: {exc}"
+        erro_execucao = f"{type(exc).__name__}: {exc}"
+    finally:
+        sys.stdout = old_stdout
+        for m, orig in backup_sys_modules.items():
+            if orig is None:
+                sys.modules.pop(m, None)
+            else:
+                sys.modules[m] = orig
+        for attr in ("ticks_ms", "ticks_us", "ticks_diff", "ticks_add", "sleep", "sleep_ms", "sleep_us"):
+            if attr in backup_time_attrs:
+                setattr(time, attr, backup_time_attrs[attr])
+            elif hasattr(time, attr):
+                delattr(time, attr)
+
+    return {
+        "ok": sucesso,
+        "erro": erro_execucao,
+        "traceback": tb_resumido,
+        "stdout": buffer_stdout.getvalue().strip(),
+        "pinos_usados": sorted(pinos_usados),
+        "textos_oled": textos_oled,
+        "ciclos_dht": leituras_dht[0],
+    }
+
+
+def executar_sandbox_python_desktop(codigo_limpo: str) -> dict:
+    """Executa código Python desktop em subprocesso isolado com timeout para validar execução real."""
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", codigo_limpo],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        ok = proc.returncode == 0
+        return {
+            "ok": ok,
+            "erro": None if ok else (proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else "Erro de execução"),
+            "traceback": proc.stderr.strip(),
+            "stdout": proc.stdout.strip(),
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "erro": "TimeoutExpired: O código entrou em loop infinito ou demorou mais de 5s.",
+            "traceback": "TimeoutExpired após 5 segundos",
+            "stdout": "",
+        }
+
+
+def executar_verificacao_qa(
+    codigo_bruto: str,
+    pedido_usuario: str,
+    escopo: str,
+    arquitetura: str,
+    perfil: dict,
+) -> dict:
+    """
+    Executa a bateria completa de testes de QA sobre o código gerado:
+    1. Análise Estática AST (SyntaxError e variáveis/imports indefinidos).
+    2. Execução Real em Sandbox (MicroPython Mock RP2040/ESP32 ou Subprocesso Python).
+    3. Validação Cruzada de Hardware e Requisitos (pinos no diagram.json, OLED e JSON serial).
+    """
+    codigo_limpo = extrair_bloco_codigo(codigo_bruto, arquitetura)
+    linguagem = perfil["linguagem"]
+    modo_wokwi = perfil["modo_wokwi"]
+    board_id = perfil["board_id"]
+
+    testes = []
+    erros_detalhados = []
+
+    if linguagem in ("MicroPython", "CircuitPython", "Python"):
+        res_ast = analisar_ast_codigo_python(codigo_limpo)
+        if res_ast["erro_sintaxe"]:
+            testes.append(("AST & Sintaxe", False, res_ast["erro_sintaxe"]))
+            erros_detalhados.append(res_ast["erro_sintaxe"])
+        elif res_ast["indefinidos"]:
+            nomes_str = ", ".join(f"'{n}' (linha {ln})" for n, ln in res_ast["indefinidos"])
+            msg = f"NameError potencial — Símbolos usados sem import/definição: {nomes_str}"
+            testes.append(("AST & Escopo de Imports", False, msg))
+            erros_detalhados.append(msg)
+        else:
+            testes.append(("AST & Escopo de Imports", True, "Sintaxe válida e todos os símbolos/imports definidos"))
+
+        if modo_wokwi and linguagem == "MicroPython":
+            proibidas = [
+                lib
+                for lib in ("Adafruit_", "board", "digitalio", "analogio", "wokwi_gpio")
+                if re.search(rf"\b{lib}", codigo_limpo)
+            ]
+            if proibidas:
+                msg = f"Importação incompatível com MicroPython Wokwi: {', '.join(proibidas)}"
+                testes.append(("Compatibilidade SDK MicroPython", False, msg))
+                erros_detalhados.append(msg)
+            else:
+                testes.append(("Compatibilidade SDK MicroPython", True, "Apenas módulos nativos MicroPython utilizados"))
+
+            res_sb = executar_sandbox_micropython(codigo_limpo, board_id=board_id)
+            if not res_sb["ok"]:
+                msg = f"Erro em tempo de execução no Sandbox MicroPython:\n{res_sb['traceback']}"
+                testes.append(("Sandbox MicroPython (Execução + Falha Sensor)", False, res_sb["erro"]))
+                erros_detalhados.append(msg)
+            else:
+                testes.append((
+                    "Sandbox MicroPython (Execução + Falha Sensor)",
+                    True,
+                    f"Executou ciclos normais e sobreviveu a OSError sem travar (pinos: {', '.join(res_sb['pinos_usados']) or 'nenhum'})",
+                ))
+
+            diagram_dict = construir_diagram_dinamico(
+                pedido_usuario, escopo, arquitetura, codigo_limpo, perfil
+            )
+            conns_str = json.dumps(diagram_dict.get("connections", []))
+            pinos_faltando_diag = [
+                p for p in res_sb["pinos_usados"] if f"{board_id}:{p}" not in conns_str
+            ]
+            if pinos_faltando_diag:
+                msg = f"Pinos usados no main.py mas ausentes no diagram.json: {', '.join(pinos_faltando_diag)}"
+                testes.append(("Consistência main.py ↔ diagram.json", False, msg))
+                erros_detalhados.append(msg)
+            else:
+                testes.append((
+                    "Consistência main.py ↔ diagram.json",
+                    True,
+                    "Todos os pinos instanciados no código estão conectados no diagram.json",
+                ))
+
+            if "json" in pedido_usuario.lower() and res_sb["ok"]:
+                linhas_out = [l.strip() for l in res_sb["stdout"].splitlines() if l.strip()]
+                jsons_validos = []
+                for l in linhas_out:
+                    if l.startswith("{") and l.endswith("}"):
+                        try:
+                            jsons_validos.append(json.loads(l))
+                        except Exception:
+                            pass
+                if not jsons_validos:
+                    msg = "O requisito exige telemetria JSON no console serial (print(json.dumps(...))), mas nenhuma linha JSON válida foi impressa."
+                    testes.append(("Telemetria Serial JSON", False, msg))
+                    erros_detalhados.append(msg)
+                else:
+                    chaves_pedidas = [k for k in ("temp", "hum", "led_color") if f'"{k}"' in pedido_usuario]
+                    chaves_ausentes = [k for k in chaves_pedidas if k not in jsons_validos[0]]
+                    if chaves_ausentes:
+                        msg = f"JSON serial impresso não contém as chaves obrigatórias do requisito: {chaves_ausentes}. Recebido: {jsons_validos[0]}"
+                        testes.append(("Telemetria Serial JSON", False, msg))
+                        erros_detalhados.append(msg)
+                    else:
+                        testes.append((
+                            "Telemetria Serial JSON",
+                            True,
+                            f"JSON serial válido verificado ({len(jsons_validos)} mensagens capturadas)",
+                        ))
+        else:
+            res_sb = executar_sandbox_python_desktop(codigo_limpo)
+            if not res_sb["ok"]:
+                msg = f"Erro de execução Python:\n{res_sb['traceback']}"
+                testes.append(("Sandbox Python (Execução Real)", False, res_sb["erro"]))
+                erros_detalhados.append(msg)
+            else:
+                testes.append((
+                    "Sandbox Python (Execução Real)",
+                    True,
+                    f"Código executou com returncode 0 (saída: {res_sb['stdout'][:80]})",
+                ))
+    else:
+        tem_setup = "void setup" in codigo_limpo or "int main" in codigo_limpo
+        chaves_ok = codigo_limpo.count("{") == codigo_limpo.count("}") and codigo_limpo.count("{") > 0
+        if not tem_setup or not chaves_ok:
+            msg = "Estrutura C/C++ incompleta (ausência de setup()/loop() ou chaves desbalanceadas)."
+            testes.append(("Validação Estrutural C/C++", False, msg))
+            erros_detalhados.append(msg)
+        else:
+            testes.append(("Validação Estrutural C/C++", True, "Funções principais e blocos C/C++ balanceados"))
+
+    return {
+        "aprovado": len(erros_detalhados) == 0,
+        "codigo_limpo": codigo_limpo,
+        "testes": testes,
+        "erros": erros_detalhados,
+    }
+
+
+def formatar_relatorio_qa_markdown(res_qa: dict, tentativa: int) -> str:
+    """Formata o resultado dos testes do Verificador QA em Markdown."""
+    status_global = "✅ [APROVADO]" if res_qa["aprovado"] else f"❌ [REPROVADO — Tentativa {tentativa}/{MAX_TENTATIVAS_QA}]"
+    linhas = [f"### 🧪 Relatório do Verificador QA & Sandbox — {status_global}\n"]
+    for nome_teste, passou, detalhe in res_qa["testes"]:
+        icone = "PASSOU" if passou else "FALHOU"
+        marcador = "✓" if passou else "✗"
+        linhas.append(f"- **[{icone}]** `{nome_teste}`: {marcador} {detalhe}")
+    if res_qa["erros"]:
+        linhas.append("\n**Erros capturados para correção automática:**")
+        for err in res_qa["erros"]:
+            linhas.append(f"```text\n{err}\n```")
+    return "\n".join(linhas)
+
+
+def executar_loop_qa_e_correcao(
+    llm: ChatOllama,
+    pedido_usuario: str,
+    escopo: str,
+    arquitetura: str,
+    codigo_bruto: str,
+) -> str:
+    """
+    Implementa o Loop Dinâmico de Verificação e Correção Automática (Stateless Feedback Loop):
+    1. Executa o Verificador QA & Sandbox sobre o código gerado pelo Desenvolvedor.
+    2. Se qualquer teste falhar (NameError, SyntaxError, TypeError de I2C, falha em OSError,
+       JSON serial inválido ou pino desconectado), aciona o Agente Corretor enviando o código +
+       o Traceback exato sem acumular histórico na VRAM.
+    3. Repete até aprovar ou atingir MAX_TENTATIVAS_QA, aplicando sanitização determinística
+       como garantia final.
+    """
+    perfil = detectar_perfil_projeto(f"{pedido_usuario}\n{escopo}")
+    board_nome = perfil["board_nome"]
+    linguagem = perfil["linguagem"]
+    arq_codigo = perfil["arq_codigo"]
+    bloco_md = perfil["bloco_md"]
+
+    codigo_atual = codigo_bruto
+    historico_qa_md = []
+    res_qa = {"aprovado": False}
+
+    for tentativa in range(1, MAX_TENTATIVAS_QA + 1):
+        res_qa = executar_verificacao_qa(
+            codigo_atual, pedido_usuario, escopo, arquitetura, perfil
+        )
+        relatorio_md = formatar_relatorio_qa_markdown(res_qa, tentativa)
+        historico_qa_md.append(relatorio_md)
+
+        cor_painel = "green" if res_qa["aprovado"] else "red"
+        titulo_painel = (
+            f"[bold green]🧪 Verificador QA & Sandbox — Tentativa {tentativa}/{MAX_TENTATIVAS_QA}: APROVADO[/bold green]"
+            if res_qa["aprovado"]
+            else f"[bold red]🧪 Verificador QA & Sandbox — Tentativa {tentativa}/{MAX_TENTATIVAS_QA}: FALHA DETECTADA[/bold red]"
+        )
+        console.print()
+        console.print(Panel(Markdown(relatorio_md), title=titulo_painel, border_style=cor_painel, box=box.ROUNDED))
+
+        if res_qa["aprovado"]:
+            break
+
+        if tentativa < MAX_TENTATIVAS_QA:
+            erros_texto = "\n\n".join(res_qa["erros"])
+            codigo_atual = executar_agente(
+                llm=llm,
+                nome_agente=f"Agente Corretor QA — Tentativa {tentativa}/{MAX_TENTATIVAS_QA - 1} ({linguagem})",
+                icone="🔄",
+                cor="magenta",
+                system_prompt=(
+                    f"Você é um Engenheiro de QA e Firmware Sênior especialista em {board_nome} ({linguagem}). "
+                    f"O código anterior falhou na execução real do Sandbox com os erros abaixo. "
+                    f"Sua única função é corrigir TODOS os erros apontados no Traceback e devolver o código "
+                    f"completo e funcional de `{arq_codigo}` dentro de um bloco ```{bloco_md} ... ```."
+                ),
+                user_prompt=(
+                    f"Corrija o código abaixo que falhou nos testes automatizados do Sandbox.\n\n"
+                    f"=== ERROS REAIS CAPTURADOS NO SANDBOX ===\n{erros_texto}\n\n"
+                    f"=== CÓDIGO COM DEFEITO ===\n```{bloco_md}\n{res_qa['codigo_limpo']}\n```\n\n"
+                    f"=== REQUISITOS ORIGINAIS ===\n{pedido_usuario}\n\n"
+                    f"INSTRUÇÕES DE CORREÇÃO OBRIGATÓRIAS:\n"
+                    f"1. Inclua TODOS os imports no topo (`import machine`, `from machine import Pin, I2C`, `import dht`, `import time`, `import json`, `from ssd1306 import SSD1306_I2C`).\n"
+                    f"2. Se usar DHT22, instancie com `dht.DHT22(Pin(15))` e trate `except OSError:`.\n"
+                    f"3. Se usar I2C no Raspberry Pi Pico, passe o ID do barramento 0: `I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)`.\n"
+                    f"4. Devolva o código COMPLETO corrigido dentro de ```{bloco_md} ... ```."
+                ),
+            )
+
+    if perfil["modo_wokwi"] and linguagem == "MicroPython":
+        cod_extraido = extrair_bloco_codigo(codigo_atual, arquitetura)
+        cod_sanitizado = sanitizar_codigo_micropython(cod_extraido)
+        if cod_sanitizado != cod_extraido or not res_qa["aprovado"]:
+            codigo_atual = f"```{bloco_md}\n{cod_sanitizado}\n```"
+            res_final = executar_verificacao_qa(
+                codigo_atual, pedido_usuario, escopo, arquitetura, perfil
+            )
+            if not res_qa["aprovado"] and res_final["aprovado"]:
+                rel_final = formatar_relatorio_qa_markdown(res_final, MAX_TENTATIVAS_QA)
+                historico_qa_md.append(rel_final)
+                console.print(
+                    Panel(
+                        Markdown(rel_final),
+                        title="[bold green]🧪 Verificador QA & Sandbox — Pós-Sanitização AST: APROVADO[/bold green]",
+                        border_style="green",
+                        box=box.ROUNDED,
+                    )
+                )
+
+    resumo_qa = "\n\n---\n\n".join(historico_qa_md)
+    return f"{codigo_atual}\n\n---\n\n{resumo_qa}"
 
 
 def gerar_firmware_uf2_wokwi(codigo_main: str, codigo_ssd1306: str, destino_uf2: str) -> bool:
@@ -695,7 +1469,12 @@ def construir_diagram_dinamico(
     board_id = perfil["board_id"]
     texto_pedido = (pedido_usuario if pedido_usuario.strip() else f"{escopo}\n{codigo}").lower()
 
-    # 1. Tenta aproveitar JSON gerado pelo LLM se já estiver 100% no schema Wokwi
+    # 1. Monta o diagrama determinístico com pinagem oficial do Wokwi para os componentes solicitados
+    diagrama_dinamico = _montar_partes_dinamicas(texto_pedido, board_type, board_id)
+    if len(diagrama_dinamico.get("parts", [])) > 1:
+        return diagrama_dinamico
+
+    # 2. Fallback: aproveita JSON gerado pelo LLM caso o pedido use apenas componentes não mapeados acima
     padrao_json = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
     for fonte in (codigo, arquitetura, escopo):
         for match in padrao_json.findall(fonte):
@@ -725,7 +1504,7 @@ def construir_diagram_dinamico(
             except Exception:
                 continue
 
-    return _montar_partes_dinamicas(texto_pedido, board_type, board_id)
+    return diagrama_dinamico
 
 
 def _montar_partes_dinamicas(texto_pedido: str, board_type: str, board_id: str) -> dict:
@@ -757,7 +1536,11 @@ def _montar_partes_dinamicas(texto_pedido: str, board_type: str, board_id: str) 
     # DHT22 / DHT11
     if "dht22" in texto_pedido or "dht11" in texto_pedido:
         dht_type = "wokwi-dht22" if "dht22" in texto_pedido else "wokwi-dht11"
-        m_dht = re.search(r"dht.*?(gp\d+|d\d+|\b\d+\b)", texto_pedido)
+        m_dht = (
+            re.search(r"dht[^\n]*?\b(gp\d+)\b", texto_pedido)
+            or re.search(r"dht[^\n]*?(?:sda|data|pino|pin)\s*(?:->|:|=)?\s*(gp\d+|d\d+|\b\d+\b)", texto_pedido)
+            or re.search(r"\b(gp15)\b", texto_pedido)
+        )
         pino_dht = m_dht.group(1).upper() if m_dht else ("GP15" if board_id == "pico" else "4")
         if board_id == "pico" and pino_dht.isdigit():
             pino_dht = f"GP{pino_dht}"
@@ -861,6 +1644,47 @@ def _montar_partes_dinamicas(texto_pedido: str, board_type: str, board_id: str) 
         connections.extend([
             ["btn1:1.l", f"{board_id}:{pino_btn}", "blue", []],
             ["btn1:2.r", proximo_gnd(), "black", []],
+        ])
+
+    # Ultrassônico HC-SR04 (somente se pedido)
+    if "hc-sr04" in texto_pedido or "hcsr04" in texto_pedido or "ultrass" in texto_pedido:
+        p_trig = "GP2" if board_id == "pico" else ("5" if board_id == "esp" else "7")
+        p_echo = "GP3" if board_id == "pico" else ("18" if board_id == "esp" else "6")
+        parts.append({"type": "wokwi-hc-sr04", "id": "ultrasonic1", "top": -140, "left": 20, "attrs": {}})
+        connections.extend([
+            ["ultrasonic1:VCC", vcc_pin, "red", []],
+            ["ultrasonic1:GND", proximo_gnd(), "black", []],
+            ["ultrasonic1:TRIG", f"{board_id}:{p_trig}", "yellow", []],
+            ["ultrasonic1:ECHO", f"{board_id}:{p_echo}", "green", []],
+        ])
+
+    # Buzzer (somente se pedido)
+    if "wokwi-buzzer" in texto_pedido or "buzzer" in texto_pedido:
+        p_buz = "GP12" if board_id == "pico" else ("19" if board_id == "esp" else "8")
+        parts.append({"type": "wokwi-buzzer", "id": "bz1", "top": 130, "left": 20, "attrs": {"volume": "0.1"}})
+        connections.extend([
+            ["bz1:1", proximo_gnd(), "black", []],
+            ["bz1:2", f"{board_id}:{p_buz}", "red", []],
+        ])
+
+    # Sensor PIR (somente se pedido)
+    if "wokwi-pir-motion-sensor" in texto_pedido or "sensor pir" in texto_pedido or re.search(r"\bpir\b", texto_pedido):
+        p_pir = "GP11" if board_id == "pico" else ("23" if board_id == "esp" else "3")
+        parts.append({"type": "wokwi-pir-motion-sensor", "id": "pir1", "top": -140, "left": -40, "attrs": {}})
+        connections.extend([
+            ["pir1:VCC", vcc_pin, "red", []],
+            ["pir1:GND", proximo_gnd(), "black", []],
+            ["pir1:OUT", f"{board_id}:{p_pir}", "yellow", []],
+        ])
+
+    # Relé (somente se pedido)
+    if "wokwi-relay-module" in texto_pedido or "relé" in texto_pedido or "rele" in texto_pedido:
+        p_rel = "GP10" if board_id == "pico" else ("16" if board_id == "esp" else "4")
+        parts.append({"type": "wokwi-relay-module", "id": "relay1", "top": 140, "left": -40, "attrs": {}})
+        connections.extend([
+            ["relay1:VCC", vcc_pin, "red", []],
+            ["relay1:GND", proximo_gnd(), "black", []],
+            ["relay1:IN", f"{board_id}:{p_rel}", "green", []],
         ])
 
     return {
