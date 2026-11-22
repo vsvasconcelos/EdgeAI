@@ -1,69 +1,95 @@
 [
   {
     "label": "🤖 EdgeAI — Executar Sistema Multi-Agente",
-    "command": "/home/vsvasconcelos/agents/EdgeAI/.venv/bin/python3",
+    "command": "wsl.exe",
     "args": [
-      "/home/vsvasconcelos/agents/EdgeAI/app_agente.py"
+      "-d",
+      "Ubuntu-24.04",
+      "--cd",
+      "/home/vsvasconcelos/projetos/EdgeAI",
+      "/home/vsvasconcelos/projetos/EdgeAI/zed_runner.sh",
+      "agent"
     ],
-    "cwd": "/home/vsvasconcelos/agents/EdgeAI",
-    "env": {
-      "PYTHONIOENCODING": "utf-8",
-      "PYTHONWARNINGS": "ignore::UserWarning"
-    },
     "use_new_terminal": true,
     "allow_concurrent_runs": false,
     "reveal": "always"
   },
   {
     "label": "🔍 EdgeAI — Verificar Ambiente",
-    "command": "bash",
+    "command": "wsl.exe",
     "args": [
-      "-c",
-      "echo '=== Ollama ===' && ollama list && echo '' && echo '=== Python ===' && /home/vsvasconcelos/agents/EdgeAI/.venv/bin/python3 --version && echo '' && echo '=== CrewAI ===' && /home/vsvasconcelos/agents/EdgeAI/.venv/bin/pip show crewai | grep -E 'Name|Version' && echo '' && echo '=== Endpoint Ollama ===' && curl -s http://localhost:11434/api/tags | python3 -m json.tool | head -20"
+      "-d",
+      "Ubuntu-24.04",
+      "--cd",
+      "/home/vsvasconcelos/projetos/EdgeAI",
+      "/home/vsvasconcelos/projetos/EdgeAI/zed_runner.sh",
+      "check"
     ],
-    "cwd": "/home/vsvasconcelos/agents/EdgeAI",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always"
+  },
+  {
+    "label": "📦 EdgeAI — Instalar Dependências",
+    "command": "wsl.exe",
+    "args": [
+      "-d",
+      "Ubuntu-24.04",
+      "--cd",
+      "/home/vsvasconcelos/projetos/EdgeAI",
+      "/home/vsvasconcelos/projetos/EdgeAI/zed_runner.sh",
+      "install"
+    ],
     "use_new_terminal": true,
     "allow_concurrent_runs": false,
     "reveal": "always"
   },
   {
     "label": "🚀 EdgeAI — Iniciar Ollama",
-    "command": "bash",
+    "command": "wsl.exe",
     "args": [
-      "-c",
-      "echo 'Iniciando Ollama serve...' && ollama serve"
+      "-d",
+      "Ubuntu-24.04",
+      "--cd",
+      "/home/vsvasconcelos/projetos/EdgeAI",
+      "/home/vsvasconcelos/projetos/EdgeAI/zed_runner.sh",
+      "serve"
     ],
-    "cwd": "/home/vsvasconcelos/agents/EdgeAI",
     "use_new_terminal": true,
     "allow_concurrent_runs": false,
     "reveal": "always"
   },
   {
-    "label": "⬇️ EdgeAI — Baixar Modelo qwen2.5-coder:1.5b",
-    "command": "ollama",
+    "label": "⬇️ EdgeAI — Baixar Modelo qwen2.5-coder:3b",
+    "command": "wsl.exe",
     "args": [
-      "pull",
-      "qwen2.5-coder:1.5b"
+      "-d",
+      "Ubuntu-24.04",
+      "--cd",
+      "/home/vsvasconcelos/projetos/EdgeAI",
+      "/home/vsvasconcelos/projetos/EdgeAI/zed_runner.sh",
+      "pull"
     ],
-    "cwd": "/home/vsvasconcelos/agents/EdgeAI",
     "use_new_terminal": true,
     "allow_concurrent_runs": false,
     "reveal": "always"
   },
   {
     "label": "⚡ EdgeAI — Executar em Modo Batch",
-    "command": "bash",
+    "command": "wsl.exe",
     "args": [
-      "-c",
-      "echo 'Desenvolva uma calculadora em Python com operações básicas.' | /home/vsvasconcelos/agents/EdgeAI/.venv/bin/python3 /home/vsvasconcelos/agents/EdgeAI/app_agente.py"
+      "-d",
+      "Ubuntu-24.04",
+      "--cd",
+      "/home/vsvasconcelos/projetos/EdgeAI",
+      "/home/vsvasconcelos/projetos/EdgeAI/zed_runner.sh",
+      "batch"
     ],
-    "cwd": "/home/vsvasconcelos/agents/EdgeAI",
-    "env": {
-      "PYTHONIOENCODING": "utf-8",
-      "PYTHONWARNINGS": "ignore::UserWarning"
-    },
     "use_new_terminal": true,
     "allow_concurrent_runs": false,
     "reveal": "always"
   }
 ]
+
+
+

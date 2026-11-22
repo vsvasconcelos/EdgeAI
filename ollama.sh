@@ -18,16 +18,23 @@ usage() {
   echo "Comandos disponíveis:"
   echo "  serve          Inicia o servidor Ollama em background"
   echo "  stop           Para o servidor Ollama"
-  echo "  run [prompt]   Executa uma consulta ao modelo Qwen2.5-Coder:1.5b"
+  echo "  pull [modelo]  Baixa um modelo no Ollama local (padrão: qwen2.5-coder:3b)"
+  echo "  rm [modelo]    Remove um modelo do Ollama local"
+  echo "  run [prompt]   Executa uma consulta ao modelo Qwen2.5-Coder:3b"
   echo "  list           Lista os modelos instalados"
+  echo "  ps             Lista os modelos carregados em memória"
   echo "  status         Verifica se o servidor está rodando"
   echo "  logs           Exibe os logs do servidor"
-  echo "  chat           Abre chat interativo com Qwen2.5-Coder:1.5b"
+  echo "  chat           Abre chat interativo com Qwen2.5-Coder:3b"
   echo ""
 }
 
 case "$1" in
   serve)
+    if curl -s http://127.0.0.1:11434/ > /dev/null 2>&1; then
+      echo "[Ollama] ✅ Servidor já está ONLINE em http://127.0.0.1:11434"
+      exit 0
+    fi
     echo "[Ollama] Iniciando servidor em background..."
     "$OLLAMA_BIN" serve > "$INSTALL_DIR/ollama_server.log" 2>&1 &
     SERVO_PID=$!
@@ -59,17 +66,30 @@ case "$1" in
       echo "[Ollama] Erro: forneça um prompt."
       exit 1
     fi
-    "$OLLAMA_BIN" run qwen2.5-coder:1.5b "$*"
+    "$OLLAMA_BIN" run qwen2.5-coder:3b "$*"
     ;;
 
   chat)
-    echo "[Ollama] Abrindo chat interativo com qwen2.5-coder:1.5b"
+    echo "[Ollama] Abrindo chat interativo com qwen2.5-coder:3b"
     echo "[Ollama] Digite /bye para sair."
-    "$OLLAMA_BIN" run qwen2.5-coder:1.5b
+    "$OLLAMA_BIN" run qwen2.5-coder:3b
     ;;
 
   list)
     "$OLLAMA_BIN" list
+    ;;
+
+  ps)
+    "$OLLAMA_BIN" ps
+    ;;
+
+  rm)
+    shift
+    if [ -z "$1" ]; then
+      echo "[Ollama] Erro: informe o nome do modelo a remover."
+      exit 1
+    fi
+    "$OLLAMA_BIN" rm "$1"
     ;;
 
   status)
@@ -86,6 +106,12 @@ case "$1" in
     else
       echo "[Ollama] Nenhum log encontrado."
     fi
+    ;;
+
+  pull)
+    shift
+    MODEL="${1:-qwen2.5-coder:3b}"
+    "$OLLAMA_BIN" pull "$MODEL"
     ;;
 
   *)

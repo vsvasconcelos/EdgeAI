@@ -44,7 +44,7 @@ def rodar_pipeline_agentes(pedido: str) -> str:
         escopo, arquitetura, codigo = executar_pipeline(llm, pedido)
         
         # Grava os artefatos na pasta local do projeto
-        salvar_artefatos(escopo, arquitetura, codigo)
+        salvar_artefatos(escopo, arquitetura, codigo, pedido)
         
         pasta_artifacts = os.path.join(project_dir, "artifacts")
         

@@ -1,52 +1,116 @@
-import decimal
-from collections import defaultdict
-import threading
+from machine import Pin, ADC, PWM, I2C
+import dht
+import time
+import json
+from ssd1306 import SSD1306_I2C
 
-class Order:
-    def __init__(self, price, quantity, user_id):
-        self.price = decimal.Decimal(price)
-        self.quantity = int(quantity)
-        self.user_id = user_id
+# Pinos definidos no escopo
+display = SSD1306_I2C(128, 64, I2C(0, sda=Pin(4), scl=Pin(5)))
+button = Pin(14, Pin.IN, Pin.PULL_UP)
+led_verde = Pin(16, Pin.OUT)
+led_amarelo = PWM(Pin(17))
+led_vermelho = Pin(18, Pin.OUT)
+servo = PWM(Pin(13))
 
-class OrderBook:
-    def __init__(self):
-        self.orders = []
-        self.lock = threading.Lock()
+# Sensor DHT22
+dht_sensor = dht.DHT22(Pin(15))
 
-    def add_order(self, order: Order) -> None:
-        with self.lock:
-            self.orders.append(order)
+# Sensores ADC
+ldr_adc = ADC(Pin(26))
+potenciometro_adc = ADC(Pin(27))
 
-    def cancel_order(self, user_id: int, order_id: int) -> None:
-        with self.lock:
-            for i, order in enumerate(self.orders):
-                if order.user_id == user_id and order.order_id == order_id:
-                    del self.orders[i]
-                    break
+# Variáveis globais
+tela_atual = 0
+ultimo_clique = 0
+ultima_leitura = 0
+ultima_oled = 0
 
-    def get_balances(self) -> dict:
-        balances = defaultdict(decimal.Decimal)
-        for order in self.orders:
-            balances[order.user_id] += order.quantity
-        return dict(balances)
+def read_luminosity():
+    # Convertendo o valor lido do ADC0 para uma porcentagem de luminosidade (0 a 100%)
+    return int(ldr_adc.read_u16() * 100 / 65535)
 
-if __name__ == '__main__':
-    # Teste 1: FunçãoExiste
-    assert hasattr(OrderBook, 'add_order'), "Função add_order não existe"
-    assert hasattr(OrderBook, 'cancel_order'), "Função cancel_order não existe"
-    assert hasattr(OrderBook, 'get_balances'), "Função get_balances não existe"
+def convert_temperature_to_pwm(temperature, setpoint=25.0):
+    # Abertura proporcional do servo motor, abertura entre 0 e 90 graus se a temperatura for maior que o setpoint
+    if temperature > setpoint:
+        angulo = min(90.0, (temperature - setpoint) * (90.0 / 5.0))
+    else:
+        angulo = 0.0
+    duty_us = 500 + (angulo / 90.0) * 1000
+    return int((duty_us / 20000.0) * 65535)
 
-    # Teste 2: RetornaInteiro
-    def retorna_inteiro():
-        return 42
+def send_telemetry(temperature, humidity):
+    # Enviar dados de telemetria em formato JSON
+    data = {
+        "temperature": temperature,
+        "humidity": humidity,
+        "luminosity": read_luminosity()
+    }
+    json_data = json.dumps(data)
+    print(json_data)
 
-    assert isinstance(retorna_inteiro(), int), "Retorno deve ser um inteiro"
+def loop():
+    led_amarelo.freq(1000)
+    servo.freq(50)
+    temperature = 25.0
+    humidity = 50.0
+    while True:
+        current_time = time.ticks_ms()
 
-    # Teste 3: ResultadoPositivo
-    def resultado_positivo(x):
-        return x > 0
+        # Lendo sensor DHT22
+        try:
+            dht_sensor.measure()
+            temperature = dht_sensor.temperature()
+            humidity = dht_sensor.humidity()
+            led_vermelho.value(0)
+            led_verde.value(1)
+        except OSError as e:
+            print("Erro ao ler sensor DHT22:", e)
+            led_vermelho.value(1)
+            led_verde.value(0)
+            display.fill(0)
+            display.text("ERRO DHT22", 0, 0)
+            display.show()
 
-    assert resultado_positivo(10), "Resultado deve ser positivo"
-    assert not resultado_positivo(-5), "Resultado não deve ser negativo"
+        # Lendo sensores ADC
+        luminosity = read_luminosity()
+        setpoint_temperature = 15.0 + (potenciometro_adc.read_u16() * 25.0 / 65535.0)
 
-    print("Todos os testes passaram!")
+        # Controle do LED amarelo via PWM se luz < 40%
+        if luminosity < 40:
+            led_amarelo.duty_u16(int(((40 - luminosity) / 40.0) * 65535))
+        else:
+            led_amarelo.duty_u16(0)
+
+        # Controle do servo motor
+        servo.duty_u16(convert_temperature_to_pwm(temperature, setpoint_temperature))
+
+        # Atualizando tela OLED SSD1306
+        display.fill(0)
+        display.text(f"Temp: {temperature:.1f}C", 0, 0)
+        display.text(f"Hum: {humidity:.1f}%", 0, 12)
+        display.text(f"Set: {setpoint_temperature:.1f}C", 0, 24)
+        display.text(f"Lum: {luminosity}%", 0, 36)
+        display.show()
+
+        # Telemetria JSON na Serial
+        send_telemetry(temperature, humidity)
+
+        # Verificando pressionamento do botão
+        if button.value() == 0:
+            display.fill(0)
+            display.text("MODO: DIAG", 0, 0)
+            display.text(f"ADC LDR: {ldr_adc.read_u16()}", 0, 16)
+            display.text(f"ADC POT: {potenciometro_adc.read_u16()}", 0, 32)
+            display.show()
+
+        # Intervalo de amostragem
+        time.sleep_ms(500)
+
+# Inicialização das variáveis globais antes do loop principal
+tela_atual = 0
+ultimo_clique = 0
+ultima_leitura = 0
+ultima_oled = 0
+
+# Loop principal
+loop()

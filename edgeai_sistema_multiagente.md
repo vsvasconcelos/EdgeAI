@@ -6,9 +6,9 @@
 
 | Arquivo | Descrição |
 |---|---|
-| [app_agente.py](file:///home/vsvasconcelos/agents/EdgeAI/app_agente.py) | Script principal — pipeline direto via LLM (sem loops/ReAct) |
-| [requirements.txt](file:///home/vsvasconcelos/agents/EdgeAI/requirements.txt) | Dependências do ecossistema |
-| [zed_tasks.json](file:///home/vsvasconcelos/agents/EdgeAI/zed_tasks.json) | Configuração da IDE Zed (tasks.json) |
+| [app_agente.py](file:///home/vsvasconcelos/projetos/EdgeAI/app_agente.py) | Script principal — pipeline direto via LLM (sem loops/ReAct) |
+| [requirements.txt](file:///home/vsvasconcelos/projetos/EdgeAI/requirements.txt) | Dependências do ecossistema |
+| [zed_tasks.json](file:///home/vsvasconcelos/projetos/EdgeAI/zed_tasks.json) | Configuração da IDE Zed (tasks.json) |
 
 ---
 
@@ -21,8 +21,13 @@ No entanto, testes práticos no hardware alvo com o modelo local **`qwen2.5-code
 2. **Context Bloat e estouro de VRAM:** As idas e vindas de um loop dinâmico de revisão acumulavam tokens rapidamente, estourando a janela de contexto de **4096 tokens** e forçando o transbordo para a CPU, paralisando a inferência local.
 3. **Loops Infinitos:** O modelo entrava com facilidade em loops de repetição infrutíferos (por exemplo, 27 minutos sem produzir código ou progresso).
 
-**A Solução de Contorno:** 
+**A Solução de Contorno (Fase 1):** 
 O sistema foi simplificado para um **pipeline linear direto (GP → Arquiteto → Desenvolvedor)** implementado via chamadas diretas (`llm.invoke()`) utilizando prompts de sistema especializados. Essa arquitetura removeu o framework de execução do CrewAI e a lógica de loop automatizada, alcançando 100% de estabilidade de inferência e garantindo que o modelo produza resultados rápidos e úteis em segundos.
+
+**Evolução para `qwen2.5-coder:3b` e Suporte Wokwi (Fase 2):**
+Durante a geração de projetos embarcados para o simulador **Wokwi (Raspberry Pi Pico / MicroPython)**, verificou-se que o modelo `qwen2.5-coder:1.5b` sofria de alucinação de APIs (misturando bibliotecas CPython/CircuitPython como `Adafruit_DHT`, `Adafruit_SSD1306`, `board` e `wokwi_gpio` com MicroPython) e não respeitava o schema oficial do `diagram.json` (`version`, `parts`, `connections`). Por isso:
+1. O modelo principal foi atualizado para o imediatamente superior: **`qwen2.5-coder:3b` (~1.9 GB, `Q4_K_M`)**, e a versão `1.5b` foi desinstalada.
+2. O `app_agente.py` recebeu roteamento automático (`eh_pedido_wokwi`) com prompts especializados para MicroPython nativo (`machine`, `dht`, `time`, `json`, `ssd1306`) e geração automática dos artefatos `main.py`, `diagram.json`, `ssd1306.py` e `wokwi.toml`.
 
 ---
 
@@ -35,10 +40,9 @@ O sistema foi simplificado para um **pipeline linear direto (GP → Arquiteto �
 | GPU | NVIDIA GeForce MX110 — 2 GB VRAM |
 | OS | Ubuntu Linux |
 | Motor | Ollama local — porta 11434 |
-| Modelo | `qwen2.5-coder:1.5b` (INT4, GGUF) |
-| Modo inferência | Híbrido 33% CPU / 67% GPU |
+| Modelo | `qwen2.5-coder:3b` (INT4 / Q4_K_M, GGUF, ~1.9 GB) |
+| Modo inferência | Híbrido CPU / GPU |
 | Contexto | **4096 tokens** (travado) |
-| Throughput | ~9.5 tokens/s |
 
 ---
 
@@ -93,8 +97,8 @@ graph TD
 
 ```bash
 # Verificar Ollama
-ollama serve &
-ollama pull qwen2.5-coder:1.5b
+./ollama.sh serve
+./ollama.sh pull qwen2.5-coder:3b
 
 # Instalar dependências Python
 pip install -r requirements.txt --user
@@ -103,7 +107,7 @@ pip install -r requirements.txt --user
 ### 2. Executar o sistema
 
 ```bash
-cd /home/vsvasconcelos/agents/EdgeAI
+cd /home/vsvasconcelos/projetos/EdgeAI
 python3 app_agente.py
 ```
 
@@ -119,7 +123,7 @@ echo "Crie um sistema de monitoramento de temperatura em Python." | python3 app_
 
 ```bash
 # Se não existe tasks.json:
-cp /home/vsvasconcelos/agents/EdgeAI/zed_tasks.json ~/.config/zed/tasks.json
+cp /home/vsvasconcelos/projetos/EdgeAI/zed_tasks.json ~/.config/zed/tasks.json
 ```
 
 **Para disparar**: `Ctrl+Shift+P` → "Task: Spawn" → selecione a task.
@@ -132,7 +136,7 @@ cp /home/vsvasconcelos/agents/EdgeAI/zed_tasks.json ~/.config/zed/tasks.json
 | 🔍 EdgeAI — Verificar Ambiente | Health check: Ollama + Python + CrewAI |
 | 📦 EdgeAI — Instalar Dependências | `pip install -r requirements.txt` |
 | 🚀 EdgeAI — Iniciar Ollama | `ollama serve` em terminal dedicado |
-| ⬇️ EdgeAI — Baixar Modelo | `ollama pull qwen2.5-coder:1.5b` |
+| ⬇️ EdgeAI — Baixar Modelo | `./ollama.sh pull qwen2.5-coder:3b` |
 | ⚡ EdgeAI — Executar em Modo Batch | Execução com pedido pré-definido via pipe |
 
 ---
