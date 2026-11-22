@@ -1,91 +1,120 @@
 ### Mapeamento de Objetos MicroPython
 
-```python
-from machine import Pin, ADC, PWM, I2C
-import dht
-import time
-import json
-from ssd1306 import SSD1306_I2C
+- **DHT22 Sensor**: `dht.DHT22(Pin(15))`
+- **ADCs**:
+  - Luminosidade: `ADC(Pin(26))` -> Convertido para % luminosidade (0..65535)
+  - Setpoint de temperatura: `ADC(Pin(27))` -> Convertido para setpoint (15°C..40°C)
+- **I2C**: `I2C(0, sda=Pin(4), scl=Pin(5))`
+- **SSD1306 OLED Display**: `SSD1306_I2C(128, 64, i2c)`
+- **LEDs**:
+  - Verde: `Pin(16, Pin.OUT)`
+  - Vermelho: `Pin(18, Pin.OUT)`
+- **PWMs**:
+  - LED Amarelo: `PWM(Pin(17))`
+  - Servo Motor: `PWM(Pin(13))`
 
-# Pinos definidos no escopo
-display = SSD1306_I2C(128, 64, I2C(0, sda=Pin(4), scl=Pin(5)))
-button = Pin(14, Pin.IN, Pin.PULL_UP)
-led_verde = Pin(16, Pin.OUT)
-led_amarelo = PWM(Pin(17))
-led_vermelho = Pin(18, Pin.OUT)
-servo = PWM(Pin(13))
+### Assinaturas das Funções
 
-# Sensor DHT22
-dht_sensor = dht.DHT22(Pin(15))
+1. **Leitura de Sensores e Conversões**:
+   ```python
+   def read_dht22():
+       # Ler temperatura e umidade do DHT22
+       dht_sensor.measure()
+       temperature = dht_sensor.temperature()  # °C
+       humidity = dht_sensor.humidity()        # %
+       return temperature, humidity
 
-# Sensores ADC
-ldr_adc = ADC(Pin(26))
-potenciometro_adc = ADC(Pin(27))
-```
+   def convert_luminosity_to_percent(luminance):
+       # Converter valor ADC para porcentagem de luminosidade (0..65535)
+       return int((luminance / 65535) * 100)
 
-### Assinaturas das Funções e Fórmulas de Conversão
+   def convert_temperature_to_setpoint(temperature):
+       # Converter temperatura para setpoint (15°C..40°C)
+       return int((temperature - 15) / (40 - 15)) * 65535
+   ```
 
-```python
-def read_luminosity():
-    # Convertendo o valor lido do ADC0 para uma porcentagem de luminosidade (0 a 100%)
-    return int(ldr_adc.read_u16() * 100 / 65535)
+2. **Controle Proporcional de Ventilação**:
+   ```python
+   def control_servo(temperature, setpoint):
+       # Comparar temperatura atual com o setpoint
+       if temperature <= setpoint:
+           servo.duty_u16(0)  # Servo fechado em 0°
+       else:
+           duty = int((temperature - setpoint) / (5.0)) * 65535
+           servo.duty_u16(duty)  # Abrir a janela proporcionalmente
+   ```
 
-def convert_temperature_to_pwm(temperature):
-    # Abertura proporcional do servo motor, abertura entre 0 e 90 graus se a temperatura for maior que o setpoint
-    if temperature > setpoint:
-        return int((temperature - 15) * (90 / 25))
-    else:
-        return 0
+3. **Controle PWM de Iluminação Auxiliar**:
+   ```python
+   def control_led_amarelo(luminosity):
+       # Ajustar o brilho via PWM inversamente proporcional à luminosidade
+       if luminosity < 40:
+           led_amarelo.duty_u16(65535 - luminosity)  # Acionar iluminação auxiliar
+       else:
+           led_amarelo.duty_u16(0)  # Desligar iluminação auxiliar
+   ```
 
-def send_telemetry():
-    # Enviar dados de telemetria em formato JSON quando o botão é pressionado
-    data = {
-        "temperature": dht_sensor.temperature,
-        "humidity": dht_sensor.humidity,
-        "luminosity": read_luminosity()
-    }
-    json_data = json.dumps(data)
-    print(json_data)
-```
+4. **Sinalização de Estado e Alarme Crítico**:
+   ```python
+   def update_leds(temperature, setpoint):
+       if temperature <= setpoint:
+           led_verde.value(1)  # LED Verde ligado
+           led_vermelho.value(0)  # LED Vermelho desligado
+       else:
+           led_verde.value(0)  # LED Verde desligado
+           led_vermelho.value(1)  # LED Vermelho ligado
 
-### Fluxo do Loop Principal Não-Bloqueante
+   def handle_dht22_error():
+       dht_sensor.measure()
+       temperature = None
+       humidity = None
+       print("ERRO DHT22")
+       oled.fill(0)
+       oled.text("ERRO DHT22", 0, 0)
+       oled.show()
+       led_vermelho.value(1)  # Piscar LED Vermelho
+   ```
 
-```python
-def loop():
-    while True:
-        current_time = time.ticks_ms()
+5. **Fluxo do Loop Principal Não-Bloqueante**:
+   ```python
+   import time
 
-        # Lendo sensor DHT22
-        try:
-            dht_sensor.measure()
-            temperature = dht_sensor.temperature
-            humidity = dht_sensor.humidity
-        except OSError as e:
-            print("Erro ao ler sensor DHT22:", e)
-            display.text("Erro DHT", 0, 0)
+   while True:
+       current_time = time.ticks_ms()
 
-        # Lendo sensores ADC
-        luminosity = read_luminosity()
-        setpoint_temperature = potenciometro_adc.read_u16() * 15 / 65535
+       if time.ticks_diff(current_time, last_dht22_read) >= 2000:
+           temperature, humidity = read_dht22()
+           last_dht22_read = current_time
 
-        # Controle do servo motor
-        servo.duty_u16(convert_temperature_to_pwm(temperature))
+       if time.ticks_diff(current_time, last_adc_read) >= 500:
+           luminosity = convert_luminosity_to_percent(adc_luminosity.read_u16())
+           setpoint = convert_temperature_to_setpoint(adc_setpoint.read_u16())
+           last_adc_read = current_time
 
-        # Atualizando tela OLED SSD1306
-        display.fill(0)
-        display.text(f"Temp: {temperature:.2f}C", 0, 0)
-        display.text(f"Hum: {humidity:.2f}%", 0, 8)
-        display.text(f"Lum: {luminosity:.2f}%", 0, 16)
-        display.show()
+       if time.ticks_diff(current_time, last_oled_update) >= 500:
+           update_leds(temperature, setpoint)
+           oled.fill(0)
+           oled.text(f"Temp: {temperature:.2f}°C", 0, 0)
+           oled.text(f"Hum: {humidity:.2f}% ", 0, 16)
+           oled.show()
+           last_oled_update = current_time
 
-        # Verificando pressionamento do botão
-        if button.value() == 0:
-            send_telemetry()
-            display.fill(0)
-            display.text("Telemetria enviada", 0, 0)
+       if time.ticks_diff(current_time, last_button_read) >= 500:
+           button_state = button.value()
+           last_button_read = current_time
+           # Implementar lógica para alternar entre telas Operação e Diagnóstico
 
-        # Intervalo de amostragem
-        time.sleep_ms(500)
-```
+       if time.ticks_diff(current_time, last_serial_print) >= 2000:
+           json_data = {
+               "temp": temperature,
+               "humidity": humidity,
+               "luminosity": luminosity,
+               "setpoint": setpoint
+           }
+           print(json.dumps(json_data))
+           last_serial_print = current_time
 
-Este é o esboço técnico para a arquitetura do firmware MicroPython no Wokwi.
+       # Tratar falhas de sensor e atualizar o display conforme necessário
+   ```
+
+Este mapeamento e assinaturas fornecem uma estrutura clara para implementar o projeto, garantindo que todos os requisitos sejam cumpridos.

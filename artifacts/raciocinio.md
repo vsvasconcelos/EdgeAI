@@ -1,6 +1,6 @@
 # Cadeia de Raciocínio Multi-Agente
 
-Execução: 22/11/2026 14:59:22
+Execução: 22/11/2026 15:26:50
 Modelo: `qwen2.5-coder:3b`
 
 ---
@@ -9,82 +9,81 @@ Modelo: `qwen2.5-coder:3b`
 
 # Documento de Escopo Técnico
 
-## 1. Mapa de Hardware e Pinagem
+## 1. Estrutura do Projeto
 
-### 1.1 Raspberry Pi Pico (GP4, GP5, GP13, GP14, GP15, GP16, GP17, GP18, GP26, GP27)
+### 1.1. Arquivos do Projeto
 
-| **Pino** | **Nome**       | **Descrição**                                                                 |
-|----------|----------------|--------------------------------------------------------------------------------|
-| GP4      | SDA          | Conectado ao Display OLED SSD1306 (SDA)                                         |
-| GP5      | SCL          | Conectado ao Display OLED SSD1306 (SCL)                                         |
-| GP13     | PWM Servo   | Controle proporcional do servo motor, abertura de 0 a 90 graus se temp > setpoint |
-| GP14     | IRQ Botão    | Interrupção e debounce para alternar tela Operação/Diagnóstico e telemetria JSON via Serial |
-| GP15     | DHT22       | Sensor de temperatura e umidade, amostragem a cada 2000ms, tratando OSError |
-| GP16     | LED Verde   | Normal                                                                 |
-| GP17     | PWM LED Amarelo | Luz < 40%                                                                 |
-| GP18     | LED Vermelho | Alarme/erro                                                               |
-| GP26     | ADC LDR      | Sensor de luminosidade, amostragem a cada 500ms                             |
-| GP27     | ADC Potenciômetro | Setpoint de temperatura, amostragem a cada 500ms                         |
+- **main.py**: Código principal que inicializa o sistema e controla os componentes.
+- **config.json**: Configurações gerais do sistema, incluindo parâmetros de tempo e conversões ADC.
+- **diagram.json**: Descrição dos pinos e conexões entre os componentes no Wokwi Pi Pico.
+
+### 1.2. Código Fonte
+
+O código deve ser modularizado, com funções separadas para cada tarefa principal (leitura de sensores, controle do servo, etc.). O código deve seguir o padrão PEP-8 e não usar `time.sleep()` longo no loop principal.
+
+### 1.3. Diagram.json
+
+O arquivo diagram.json deve incluir todas as conexões entre os componentes, especificando os pinos GPIO, ADCs, PWMs e I2Cs. O arquivo deve ser válido para o Wokwi Pi Pico e não deve conter resistores limitadores de corrente nos LEDs.
 
 ## 2. Requisitos Funcionais
 
-### 2.1 DHT22 (GP15)
+### 2.1. Aquisição de Sensores e Escalonamento
 
-- **Amostragem**: A cada 2000ms
-- **Conversão ADC**: Não aplicável, pois é um sensor analogico
-- **Tratamento de Erro**: Tratar OSError
+- **Sensor DHT22 (GP15)**: Ler a temperatura (°C) e umidade (%) a cada 2000 ms.
+- **Fotoresistor / LDR (GP26)**: Ler a luminosidade (0% a 100%) a cada 200 ms, convertendo para o intervalo de 0 a 65535.
+- **Potenciômetro (GP27)**: Ler o setpoint de temperatura (15°C a 40°C) a cada 200 ms, convertendo para o intervalo de 0 a 65535.
 
-### 2.2 Photoresistor LDR (GP26)
+### 2.2. Controle Proporcional de Ventilação
 
-- **Amostragem**: A cada 500ms
-- **Conversão ADC**: Convertendo o valor lido do ADC0 para uma porcentagem de luminosidade (0 a 100%)
-- **Tratamento de Erro**: Não aplicável
+- **Servo Motor (GP13)**: Comparar a temperatura atual com o setpoint:
+  - Se T_atual <= T_set: Servo fechado em 0°.
+  - Se T_atual > T_set: Abrir a janela proporcionalmente entre 0° e 90°, atingindo abertura máxima (90°) quando T_atual >= T_set + 5.0°C.
 
-### 2.3 Potenciômetro (GP27)
+### 2.3. Controle PWM de Iluminação Auxiliar
 
-- **Amostragem**: A cada 500ms
-- **Conversão ADC**: Convertendo o valor lido do ADC1 para uma temperatura em graus Celsius (15 a 40°C)
-- **Tratamento de Erro**: Não aplicável
+- **LED Amarelo (GP17)**: Ajustar o brilho via PWM inversamente proporcional à luminosidade, acionando iluminação auxiliar quando a luminosidade cair abaixo de 40%.
 
-### 2.4 Display OLED SSD1306 (SDA=GP4, SCL=GP5)
+### 2.4. Sinalização de Estado e Alarme Crítico
 
-- **Atualização**: A cada 500ms
-- **Controle de Tela**: Alternar entre tela Operação e Diagnóstico
+- **LED Verde (GP16)**: Indicador de sistema operando em faixa normal.
+- **LED Vermelho (GP18)**: Alerta de baixa luminosidade e alarme crítico.
 
-### 2.5 LED Verde (GP16)
+### 2.5. Interface Gráfica no Display OLED I2C
 
-- **Normal**: Ligado quando o sistema está operando normalmente
+- Atualizar o display a cada 500 ms sem causar cintilação.
+- O botão no GP14 deve alternar entre duas telas: Operação e Diagnóstico.
 
-### 2.6 LED Amarelo PWM (GP17)
+### 2.6. Telemetria Estruturada via Serial
 
-- **Luz < 40%**: Controlado por um valor de PWM
-- **Tratamento de Erro**: Não aplicável
+- Imprimir no console serial do Wokwi a cada 2 segundos, uma linha JSON contendo o estado completo do nó.
 
-### 2.7 LED Vermelho (GP18)
+## 3. Requisitos Não Funcionais
 
-- **Alarme/Erro**: Ligado quando ocorre um erro ou alarme
+### 3.1. Arquitetura Não-Bloqueante
 
-### 2.8 Servo Motor PWM (GP13)
+- Proibir o uso de `time.sleep()` longo no loop principal.
+- Escalonar a leitura do DHT22 (0.5 Hz), a leitura dos ADCs (5 Hz) e a atualização do OLED (2 Hz) por temporizadores não-bloqueantes.
 
-- **Abertura Proporcional**: Controlado por um valor de PWM, abertura entre 0 e 90 graus se a temperatura for maior que o setpoint
-- **Tratamento de Erro**: Não aplicável
+### 3.2. Tratamento de Falha de Sensor
 
-### 2.9 Pushbutton (IRQ Botão) no GP14
+- Caso a leitura do DHT22 lance exceção (`OSError`), registrar "temp": null no JSON, exibir "ERRO DHT22" no OLED e piscar o LED Vermelho.
 
-- **Interrupção**: Detectar pressionamento do botão
-- **Debounce**: Implementar debounce para evitar interrupções indesejadas
-- **Alternância Tela**: Alternar entre tela Operação e Diagnóstico
-- **Telemetria JSON via Serial**: Enviar dados de telemetria em formato JSON quando o botão é pressionado
+### 3.3. Fidelidade do diagram.json
 
-## 3. Critérios de Aceitação e Tratamento de Falhas
+- O arquivo diagram.json deve conectar explicitamente GND e 3V3/VBUS de todos os periféricos.
+- Incluir resistores limitadores de corrente nos LEDs.
+- Usar os nomes exatos dos pinos do wokwi-pi-pico (GP4, GP5, GP13, GP14, GP15, GP16, GP17, GP18, GP26, GP27).
 
-### 3.1 DHT22 (GP15)
+## 4. Entregáveis
 
-- **OSError**: Tratar OSError ao tentar ler os valores do sensor, exibindo uma mensagem de erro na tela OLED.
+- **Mapa de Hardware e Pinagem**: Exato no wokwi-pi-pico (GP4, GP5, GP13, GP14, GP15, GP16, GP17, GP18, GP26, GP27).
+- **Requisitos Funcionais**: Amostragem, conversões ADC 0-65535, controle proporcional do Servo, PWM do LED, telas do OLED, IRQ do botão e telemetria JSON via Serial.
+- **Critérios de Aceitação e Tratamento de Falhas**: OSError no DHT22.
+- **Restrições de Plataforma**: MicroPython nativo (`machine`, `dht`, `time`, `json`, `ssd1306`). Proibir usar `Adafruit_DHT`, `board`, `digitalio` ou `wokwi_gpio`.
 
-## 4. Restrições de Plataforma
+---
 
-- **MicroPython nativo (`machine`, `dht`, `time`, `json`, `ssd1306`). PROIBIDO usar `Adafruit_DHT`, `board`, `digitalio` ou `wokwi_gpio`.**
+Este documento fornece uma estrutura clara e detalhada para o projeto, garantindo que todos os requisitos sejam cumpridos e que a arquitetura seja não-bloqueante.
 
 ---
 
@@ -92,95 +91,124 @@ Modelo: `qwen2.5-coder:3b`
 
 ### Mapeamento de Objetos MicroPython
 
-```python
-from machine import Pin, ADC, PWM, I2C
-import dht
-import time
-import json
-from ssd1306 import SSD1306_I2C
+- **DHT22 Sensor**: `dht.DHT22(Pin(15))`
+- **ADCs**:
+  - Luminosidade: `ADC(Pin(26))` -> Convertido para % luminosidade (0..65535)
+  - Setpoint de temperatura: `ADC(Pin(27))` -> Convertido para setpoint (15°C..40°C)
+- **I2C**: `I2C(0, sda=Pin(4), scl=Pin(5))`
+- **SSD1306 OLED Display**: `SSD1306_I2C(128, 64, i2c)`
+- **LEDs**:
+  - Verde: `Pin(16, Pin.OUT)`
+  - Vermelho: `Pin(18, Pin.OUT)`
+- **PWMs**:
+  - LED Amarelo: `PWM(Pin(17))`
+  - Servo Motor: `PWM(Pin(13))`
 
-# Pinos definidos no escopo
-display = SSD1306_I2C(128, 64, I2C(0, sda=Pin(4), scl=Pin(5)))
-button = Pin(14, Pin.IN, Pin.PULL_UP)
-led_verde = Pin(16, Pin.OUT)
-led_amarelo = PWM(Pin(17))
-led_vermelho = Pin(18, Pin.OUT)
-servo = PWM(Pin(13))
+### Assinaturas das Funções
 
-# Sensor DHT22
-dht_sensor = dht.DHT22(Pin(15))
+1. **Leitura de Sensores e Conversões**:
+   ```python
+   def read_dht22():
+       # Ler temperatura e umidade do DHT22
+       dht_sensor.measure()
+       temperature = dht_sensor.temperature()  # °C
+       humidity = dht_sensor.humidity()        # %
+       return temperature, humidity
 
-# Sensores ADC
-ldr_adc = ADC(Pin(26))
-potenciometro_adc = ADC(Pin(27))
-```
+   def convert_luminosity_to_percent(luminance):
+       # Converter valor ADC para porcentagem de luminosidade (0..65535)
+       return int((luminance / 65535) * 100)
 
-### Assinaturas das Funções e Fórmulas de Conversão
+   def convert_temperature_to_setpoint(temperature):
+       # Converter temperatura para setpoint (15°C..40°C)
+       return int((temperature - 15) / (40 - 15)) * 65535
+   ```
 
-```python
-def read_luminosity():
-    # Convertendo o valor lido do ADC0 para uma porcentagem de luminosidade (0 a 100%)
-    return int(ldr_adc.read_u16() * 100 / 65535)
+2. **Controle Proporcional de Ventilação**:
+   ```python
+   def control_servo(temperature, setpoint):
+       # Comparar temperatura atual com o setpoint
+       if temperature <= setpoint:
+           servo.duty_u16(0)  # Servo fechado em 0°
+       else:
+           duty = int((temperature - setpoint) / (5.0)) * 65535
+           servo.duty_u16(duty)  # Abrir a janela proporcionalmente
+   ```
 
-def convert_temperature_to_pwm(temperature):
-    # Abertura proporcional do servo motor, abertura entre 0 e 90 graus se a temperatura for maior que o setpoint
-    if temperature > setpoint:
-        return int((temperature - 15) * (90 / 25))
-    else:
-        return 0
+3. **Controle PWM de Iluminação Auxiliar**:
+   ```python
+   def control_led_amarelo(luminosity):
+       # Ajustar o brilho via PWM inversamente proporcional à luminosidade
+       if luminosity < 40:
+           led_amarelo.duty_u16(65535 - luminosity)  # Acionar iluminação auxiliar
+       else:
+           led_amarelo.duty_u16(0)  # Desligar iluminação auxiliar
+   ```
 
-def send_telemetry():
-    # Enviar dados de telemetria em formato JSON quando o botão é pressionado
-    data = {
-        "temperature": dht_sensor.temperature,
-        "humidity": dht_sensor.humidity,
-        "luminosity": read_luminosity()
-    }
-    json_data = json.dumps(data)
-    print(json_data)
-```
+4. **Sinalização de Estado e Alarme Crítico**:
+   ```python
+   def update_leds(temperature, setpoint):
+       if temperature <= setpoint:
+           led_verde.value(1)  # LED Verde ligado
+           led_vermelho.value(0)  # LED Vermelho desligado
+       else:
+           led_verde.value(0)  # LED Verde desligado
+           led_vermelho.value(1)  # LED Vermelho ligado
 
-### Fluxo do Loop Principal Não-Bloqueante
+   def handle_dht22_error():
+       dht_sensor.measure()
+       temperature = None
+       humidity = None
+       print("ERRO DHT22")
+       oled.fill(0)
+       oled.text("ERRO DHT22", 0, 0)
+       oled.show()
+       led_vermelho.value(1)  # Piscar LED Vermelho
+   ```
 
-```python
-def loop():
-    while True:
-        current_time = time.ticks_ms()
+5. **Fluxo do Loop Principal Não-Bloqueante**:
+   ```python
+   import time
 
-        # Lendo sensor DHT22
-        try:
-            dht_sensor.measure()
-            temperature = dht_sensor.temperature
-            humidity = dht_sensor.humidity
-        except OSError as e:
-            print("Erro ao ler sensor DHT22:", e)
-            display.text("Erro DHT", 0, 0)
+   while True:
+       current_time = time.ticks_ms()
 
-        # Lendo sensores ADC
-        luminosity = read_luminosity()
-        setpoint_temperature = potenciometro_adc.read_u16() * 15 / 65535
+       if time.ticks_diff(current_time, last_dht22_read) >= 2000:
+           temperature, humidity = read_dht22()
+           last_dht22_read = current_time
 
-        # Controle do servo motor
-        servo.duty_u16(convert_temperature_to_pwm(temperature))
+       if time.ticks_diff(current_time, last_adc_read) >= 500:
+           luminosity = convert_luminosity_to_percent(adc_luminosity.read_u16())
+           setpoint = convert_temperature_to_setpoint(adc_setpoint.read_u16())
+           last_adc_read = current_time
 
-        # Atualizando tela OLED SSD1306
-        display.fill(0)
-        display.text(f"Temp: {temperature:.2f}C", 0, 0)
-        display.text(f"Hum: {humidity:.2f}%", 0, 8)
-        display.text(f"Lum: {luminosity:.2f}%", 0, 16)
-        display.show()
+       if time.ticks_diff(current_time, last_oled_update) >= 500:
+           update_leds(temperature, setpoint)
+           oled.fill(0)
+           oled.text(f"Temp: {temperature:.2f}°C", 0, 0)
+           oled.text(f"Hum: {humidity:.2f}% ", 0, 16)
+           oled.show()
+           last_oled_update = current_time
 
-        # Verificando pressionamento do botão
-        if button.value() == 0:
-            send_telemetry()
-            display.fill(0)
-            display.text("Telemetria enviada", 0, 0)
+       if time.ticks_diff(current_time, last_button_read) >= 500:
+           button_state = button.value()
+           last_button_read = current_time
+           # Implementar lógica para alternar entre telas Operação e Diagnóstico
 
-        # Intervalo de amostragem
-        time.sleep_ms(500)
-```
+       if time.ticks_diff(current_time, last_serial_print) >= 2000:
+           json_data = {
+               "temp": temperature,
+               "humidity": humidity,
+               "luminosity": luminosity,
+               "setpoint": setpoint
+           }
+           print(json.dumps(json_data))
+           last_serial_print = current_time
 
-Este é o esboço técnico para a arquitetura do firmware MicroPython no Wokwi.
+       # Tratar falhas de sensor e atualizar o display conforme necessário
+   ```
+
+Este mapeamento e assinaturas fornecem uma estrutura clara para implementar o projeto, garantindo que todos os requisitos sejam cumpridos.
 
 ---
 
@@ -193,90 +221,133 @@ import time
 import json
 from ssd1306 import SSD1306_I2C
 
-# Pinos definidos no escopo
-display = SSD1306_I2C(128, 64, I2C(0, sda=Pin(4), scl=Pin(5)))
-button = Pin(14, Pin.IN, Pin.PULL_UP)
+# Inicialização dos pinos
 led_verde = Pin(16, Pin.OUT)
 led_amarelo = PWM(Pin(17))
 led_vermelho = Pin(18, Pin.OUT)
 servo = PWM(Pin(13))
+button = Pin(14, Pin.IN, Pin.PULL_UP)
 
-# Sensor DHT22
-dht_sensor = dht.DHT22(Pin(15))
+# Configuração dos PWMs
+led_amarelo.freq(1000)
+servo.freq(50)
 
-# Sensores ADC
-ldr_adc = ADC(Pin(26))
-potenciometro_adc = ADC(Pin(27))
+# Inicialização das ADCs
+adc_luminosity = ADC(Pin(26))
+adc_setpoint = ADC(Pin(27))
 
-# Variáveis globais
-tela_atual = 0
-ultimo_clique = 0
-ultima_leitura = 0
-ultima_oled = 0
+# Inicialização do I2C para o OLED
+i2c = I2C(0, sda=Pin(4), scl=Pin(5))
+oled = SSD1306_I2C(128, 64, i2c)
 
-def read_luminosity():
-    # Convertendo o valor lido do ADC0 para uma porcentagem de luminosidade (0 a 100%)
-    return int(ldr_adc.read_u16() * 100 / 65535)
+# Configuração inicial dos valores
+temperature = 25.0
+humidity = 50.0
+setpoint = 25.0
 
-def convert_temperature_to_pwm(temperature):
-    # Abertura proporcional do servo motor, abertura entre 0 e 90 graus se a temperatura for maior que o setpoint
-    if temperature > setpoint:
-        return int((temperature - 15) * (90 / 25))
+# Variáveis para temporizadores
+last_dht22_read = time.ticks_ms()
+last_adc_read = time.ticks_ms()
+last_oled_update = time.ticks_ms()
+last_button_read = time.ticks_ms()
+last_serial_print = time.ticks_ms()
+
+# Função de tratamento de erro do DHT22
+def handle_dht22_error():
+    dht_sensor.measure()
+    temperature = None
+    humidity = None
+    print("ERRO DHT22")
+    oled.fill(0)
+    oled.text("ERRO DHT22", 0, 0)
+    oled.show()
+    led_vermelho.value(1)  # Piscar LED Vermelho
+
+# Função de atualização dos LEDs
+def update_leds(temperature, setpoint):
+    if temperature <= setpoint:
+        led_verde.value(1)  # LED Verde ligado
+        led_vermelho.value(0)  # LED Vermelho desligado
     else:
-        return 0
+        led_verde.value(0)  # LED Verde desligado
+        led_vermelho.value(1)  # LED Vermelho ligado
 
-def send_telemetry():
-    # Enviar dados de telemetria em formato JSON quando o botão é pressionado
-    data = {
-        "temperature": dht_sensor.temperature,
-        "humidity": dht_sensor.humidity,
-        "luminosity": read_luminosity()
-    }
-    json_data = json.dumps(data)
-    print(json_data)
+# Função de controle do servo
+def control_servo(temperature, setpoint):
+    if temperature <= setpoint:
+        servo.duty_u16(0)  # Servo fechado em 0°
+    else:
+        duty = int((temperature - setpoint) / (5.0)) * 65535
+        servo.duty_u16(duty)  # Abrir a janela proporcionalmente
 
-def loop():
-    while True:
-        current_time = time.ticks_ms()
+# Função de controle da iluminação auxiliar
+def control_led_amarelo(luminosity):
+    if luminosity < 40:
+        led_amarelo.duty_u16(65535 - luminosity)  # Acionar iluminação auxiliar
+    else:
+        led_amarelo.duty_u16(0)  # Desligar iluminação auxiliar
 
-        # Lendo sensor DHT22
-        try:
-            dht_sensor.measure()
-            temperature = dht_sensor.temperature
-            humidity = dht_sensor.humidity
-        except OSError as e:
-            print("Erro ao ler sensor DHT22:", e)
-            display.text("Erro DHT", 0, 0)
+# Função de leitura do DHT22
+def read_dht22():
+    try:
+        dht_sensor.measure()
+        temperature = dht_sensor.temperature()  # °C
+        humidity = dht_sensor.humidity()        # %
+        return temperature, humidity
+    except OSError:
+        handle_dht22_error()
 
-        # Lendo sensores ADC
-        luminosity = read_luminosity()
-        setpoint_temperature = potenciometro_adc.read_u16() * 15 / 65535
+# Função de conversão da luminosidade para porcentagem
+def convert_luminosity_to_percent(luminance):
+    return int((luminance / 65535) * 100)
 
-        # Controle do servo motor
-        servo.duty_u16(convert_temperature_to_pwm(temperature))
+# Função de conversão da temperatura para setpoint
+def convert_temperature_to_setpoint(temperature):
+    return int((temperature - 15) / (40 - 15)) * 65535
 
-        # Atualizando tela OLED SSD1306
-        display.fill(0)
-        display.text(f"Temp: {temperature:.2f}C", 0, 0)
-        display.text(f"Hum: {humidity:.2f}%", 0, 8)
-        display.text(f"Lum: {luminosity:.2f}%", 0, 16)
-        display.show()
+# Função de tratamento do botão
+def button_handler(pin):
+    global tela_atual
+    tela_atual = 1 - tela_atual
 
-        # Verificando pressionamento do botão
-        if button.value() == 0:
-            send_telemetry()
-            display.fill(0)
-            display.text("Telemetria enviada", 0, 0)
+# Configuração da interrupção no botão
+button.irq(trigger=Pin.IRQ_FALLING, handler=button_handler)
 
-        # Intervalo de amostragem
-        time.sleep_ms(500)
+# Loop principal não-bloqueante
+while True:
+    current_time = time.ticks_ms()
 
-# Inicialização das variáveis globais antes do loop principal
-tela_atual = 0
-ultimo_clique = 0
-ultima_leitura = 0
-ultima_oled = 0
+    if time.ticks_diff(current_time, last_dht22_read) >= 2000:
+        temperature, humidity = read_dht22()
+        last_dht22_read = current_time
 
-# Loop principal
-loop()
+    if time.ticks_diff(current_time, last_adc_read) >= 500:
+        luminosity = convert_luminosity_to_percent(adc_luminosity.read_u16())
+        setpoint = convert_temperature_to_setpoint(adc_setpoint.read_u16())
+        last_adc_read = current_time
+
+    if time.ticks_diff(current_time, last_oled_update) >= 500:
+        update_leds(temperature, setpoint)
+        oled.fill(0)
+        oled.text(f"Temp: {temperature:.2f}°C", 0, 0)
+        oled.text(f"Hum: {humidity:.2f}% ", 0, 16)
+        oled.show()
+        last_oled_update = current_time
+
+    if time.ticks_diff(current_time, last_button_read) >= 500:
+        button_state = button.value()
+        last_button_read = current_time
+        # Implementar lógica para alternar entre telas Operação e Diagnóstico
+
+    if time.ticks_diff(current_time, last_serial_print) >= 2000:
+        json_data = {
+            "temp": temperature,
+            "humidity": humidity,
+            "luminosity": luminosity,
+            "setpoint": setpoint
+        }
+        print(json.dumps(json_data))
+        last_serial_print = current_time
+
+    # Tratar falhas de sensor e atualizar o display conforme necessário
 ```

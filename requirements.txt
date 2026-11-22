@@ -2,7 +2,7 @@
 # EdgeAI - Sistema Multi-Agente Local (Edge AI)
 # Dependências do ecossistema
 # Hardware alvo: 8GB RAM | NVIDIA MX110 2GB VRAM | Ubuntu Linux
-# Modelo: qwen2.5-coder:1.5b via Ollama (porta 11434)
+# Modelo: qwen2.5-coder:3b via Ollama (porta 11434)
 #
 # Estratégia: fixamos APENAS crewai e deixamos o pip resolver
 # as versões exatas de langchain e pydantic automaticamente,
@@ -32,3 +32,7 @@ setuptools<81.0.0
 opentelemetry-api>=1.24.0
 opentelemetry-sdk>=1.24.0
 opentelemetry-exporter-otlp-proto-http>=1.24.0
+
+# --- Simulação Wokwi / MicroPython (UF2 LittleFS2 & Serial REPL) ---
+littlefs-python>=0.12.0
+mpremote>=1.24.0

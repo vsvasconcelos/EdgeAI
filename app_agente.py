@@ -224,7 +224,7 @@ DIAGRAM_WOKWI_PADRAO_PICO = {
     "author": "EdgeAI",
     "editor": "wokwi",
     "parts": [
-        {"type": "wokwi-pi-pico", "id": "pico", "top": 0, "left": 0, "attrs": {"env": "micropython-20231005-v1.21.0"}},
+        {"type": "wokwi-pi-pico", "id": "pico", "top": 0, "left": 0, "attrs": {}},
         {"type": "wokwi-dht22", "id": "dht1", "top": -120, "left": -130, "attrs": {}},
         {"type": "wokwi-photoresistor-sensor", "id": "ldr1", "top": -120, "left": 120, "attrs": {}},
         {"type": "wokwi-potentiometer", "id": "pot1", "top": -20, "left": 160, "attrs": {}},
@@ -501,10 +501,101 @@ def sanitizar_codigo_micropython(codigo: str) -> str:
     """
     Corrige deslizes comuns de geração de LLMs para MicroPython no Wokwi:
     - Garante chamada de método em .temperature() e .humidity() do módulo dht.
+    - Garante instância de dht_sensor = dht.DHT22(Pin(15)) e tela_atual = 0.
     """
     codigo = re.sub(r"(\bdht\w*\.temperature)(?!\s*\()", r"\1()", codigo)
     codigo = re.sub(r"(\bdht\w*\.humidity)(?!\s*\()", r"\1()", codigo)
+    if "dht_sensor" in codigo and not re.search(r"^\s*dht_sensor\s*=", codigo, re.MULTILINE):
+        codigo = codigo.replace(
+            "import dht",
+            "import dht\ndht_sensor = dht.DHT22(Pin(15))",
+            1,
+        )
+    if "tela_atual" in codigo and not re.search(r"^\s*tela_atual\s*=", codigo, re.MULTILINE):
+        codigo = "tela_atual = 0\n" + codigo
     return codigo
+
+
+def gerar_firmware_uf2_wokwi(codigo_main: str, codigo_ssd1306: str, destino_uf2: str) -> bool:
+    """
+    Empacota main.py e ssd1306.py em uma partição LittleFS2 (0x100A0000) anexada ao
+    firmware MicroPython base do Raspberry Pi Pico (firmware_base.uf2).
+    Permite que a extensão Wokwi Simulator do VS Code execute main.py automaticamente no boot.
+    """
+    import struct
+    pasta_base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
+    caminho_base_uf2 = os.path.join(pasta_base, "firmware_base.uf2")
+    if not os.path.exists(caminho_base_uf2):
+        return False
+
+    try:
+        from littlefs import LittleFS
+
+        # Inicializa buffer com 0xFF (estado apagado da memória Flash NOR)
+        fs = LittleFS(
+            block_size=4096,
+            block_count=352,
+            read_size=256,
+            prog_size=256,
+            cache_size=256,
+            lookahead_size=32,
+        )
+        with fs.open("ssd1306.py", "w") as f:
+            f.write(codigo_ssd1306)
+        with fs.open("main.py", "w") as f:
+            f.write(codigo_main)
+
+        lfs_buf = bytes(fs.context.buffer)
+        blocos_usados = [
+            blk_idx
+            for blk_idx in range(352)
+            if any(b != 0xFF and b != 0x00 for b in lfs_buf[blk_idx * 4096 : (blk_idx + 1) * 4096])
+        ]
+
+        raw_base = open(caminho_base_uf2, "rb").read()
+        num_base_blocks = len(raw_base) // 512
+
+        novos_payloads = []
+        base_lfs_addr = 0x100A0000
+        for blk_idx in blocos_usados:
+            bloco_4k = lfs_buf[blk_idx * 4096 : (blk_idx + 1) * 4096]
+            for page in range(16):  # 16 páginas de 256 bytes por setor de 4096 bytes
+                addr = base_lfs_addr + blk_idx * 4096 + page * 256
+                chunk = bloco_4k[page * 256 : (page + 1) * 256]
+                novos_payloads.append((addr, chunk))
+
+        total_blocks = num_base_blocks + len(novos_payloads)
+        out = bytearray()
+
+        # Regrava os blocos do firmware base atualizando total_blocks
+        for i in range(num_base_blocks):
+            blk = bytearray(raw_base[i * 512 : (i + 1) * 512])
+            struct.pack_into("<II", blk, 20, i, total_blocks)
+            out.extend(blk)
+
+        # Anexa os blocos UF2 da partição LittleFS2
+        for idx, (addr, chunk) in enumerate(novos_payloads):
+            seq = num_base_blocks + idx
+            header = struct.pack(
+                "<IIIIIIII",
+                0x0A324655,
+                0x9E5D5157,
+                0x00002000,
+                addr,
+                256,
+                seq,
+                total_blocks,
+                0xE48BFF56,
+            )
+            padding = b"\x00" * (476 - 256)
+            footer = struct.pack("<I", 0x0AB16F30)
+            out.extend(header + chunk + padding + footer)
+
+        with open(destino_uf2, "wb") as f_out:
+            f_out.write(out)
+        return True
+    except Exception:
+        return False
 
 
 def extrair_diagram_json(escopo: str, arquitetura: str, codigo: str) -> dict:
@@ -584,8 +675,9 @@ def salvar_artefatos(escopo: str, arquitetura: str, codigo: str, pedido_usuario:
         wokwi_toml = (
             "[wokwi]\n"
             "version = 1\n"
-            'firmware = ""\n'
-            'elf = ""\n'
+            'firmware = "firmware.uf2"\n'
+            'elf = "firmware.uf2"\n'
+            "rfc2217ServerPort = 4000\n"
         )
         arquivos_gerados.extend([
             ("main.py", codigo_limpo),
@@ -604,6 +696,13 @@ def salvar_artefatos(escopo: str, arquitetura: str, codigo: str, pedido_usuario:
     for nome_arq, conteudo in arquivos_gerados:
         with open(os.path.join(pasta_base, nome_arq), "w", encoding="utf-8") as f:
             f.write(conteudo)
+
+    if modo_wokwi:
+        uf2_run = os.path.join(pasta_run, "firmware.uf2")
+        uf2_latest = os.path.join(pasta_base, "firmware.uf2")
+        if gerar_firmware_uf2_wokwi(codigo_limpo, DRIVER_SSD1306_MICROPYTHON, uf2_run):
+            import shutil
+            shutil.copyfile(uf2_run, uf2_latest)
 
     console.print(f"[bold green]✓ Histórico gravado em:[/bold green] [cyan]{pasta_run}/[/cyan]")
     console.print(f"[bold green]✓ Versão mais recente atualizada em:[/bold green] [cyan]{pasta_base}/[/cyan]")

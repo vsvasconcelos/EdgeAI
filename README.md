@@ -258,9 +258,15 @@ Quando você solicita um projeto embarcado para **Wokwi / MicroPython / Raspberr
 5. Clique no botão verde **Start the simulation (Play ▶️)** para interagir com os sensores (DHT22, LDR, potenciômetro, botão GP14, servo e OLED) em tempo real.
 
 ### Opção 2: Executar no VS Code (Extensão Wokwi Simulator)
-1. Instale a extensão **Wokwi Simulator** no VS Code e ative sua licença gratuita (`Wokwi: Request a New License`).
+Diferente da versão Web, a extensão **Wokwi Simulator** do VS Code exige um binário `.uf2` local do MicroPython configurado no `wokwi.toml`. O `app_agente.py` já empacota automaticamente o `main.py` e o `ssd1306.py` dentro da partição LittleFS2 (`0x100A0000`) do arquivo **`firmware.uf2`**.
+
+1. Instale a extensão **Wokwi Simulator** (`wokwi.wokwi-vscode`) no VS Code e ative sua licença gratuita (`Wokwi: Request a New License`).
 2. Abra o arquivo `artifacts/diagram.json` (ou de qualquer subpasta `artifacts/run_*/diagram.json`).
 3. Pressione `F1` / `Ctrl+Shift+P` e selecione **`Wokwi: Start Simulator`**.
+4. Caso queira reenviar ou testar alterações no `main.py` com o simulador aberto via porta serial virtual (`rfc2217ServerPort = 4000`), mantenha a aba do simulador visível e execute em outro terminal:
+   ```bash
+   ./.venv/bin/python3 -m mpremote connect port:rfc2217://localhost:4000 fs cp artifacts/ssd1306.py :ssd1306.py + run artifacts/main.py
+   ```
 
 ---
 
