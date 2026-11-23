@@ -854,6 +854,29 @@ def sanitizar_codigo_micropython(codigo: str) -> str:
     codigo = re.sub(r"^[ \t]*(?:import\s+analogio|from\s+analogio\s+import\s+.*)\n?", "", codigo, flags=re.MULTILINE)
     codigo = re.sub(r"^[ \t]*(?:import\s+wokwi_gpio|from\s+wokwi_gpio\s+import\s+.*)\n?", "", codigo, flags=re.MULTILINE)
 
+    # Injeta fallback autônomo para SSD1306_I2C caso o usuário não crie o arquivo ssd1306.py no Wokwi
+    if "from ssd1306 import SSD1306_I2C" in codigo and "except ImportError:" not in codigo:
+        bloco_ssd1306_seguro = (
+            "try:\n"
+            "    from ssd1306 import SSD1306_I2C\n"
+            "except ImportError:\n"
+            "    import framebuf\n"
+            "    class SSD1306_I2C(framebuf.FrameBuffer):\n"
+            "        def __init__(self, width, height, i2c, addr=0x3C):\n"
+            "            self.width, self.height, self.i2c, self.addr = width, height, i2c, addr\n"
+            "            self.buffer = bytearray((self.height // 8) * self.width)\n"
+            "            super().__init__(self.buffer, self.width, self.height, framebuf.MONO_VLSB)\n"
+            "            for cmd in (0xAE, 0x20, 0x00, 0x40, 0xA1, 0xA8, height - 1, 0xC8, 0xD3, 0x00, 0xDA, 0x12, 0xD5, 0x80, 0xD9, 0xF1, 0xDB, 0x30, 0x81, 0xFF, 0xA4, 0xA6, 0x8D, 0x14, 0xAF):\n"
+            "                self.i2c.writeto(self.addr, bytearray([0x80, cmd]))\n"
+            "            self.fill(0)\n"
+            "            self.show()\n"
+            "        def show(self):\n"
+            "            for cmd in (0x21, 0, self.width - 1, 0x22, 0, (self.height // 8) - 1):\n"
+            "                self.i2c.writeto(self.addr, bytearray([0x80, cmd]))\n"
+            "            self.i2c.writevto(self.addr, [b\"\\x40\", self.buffer])"
+        )
+        codigo = codigo.replace("from ssd1306 import SSD1306_I2C", bloco_ssd1306_seguro, 1)
+
     # Garante import machine no topo se ausente
     if not re.search(r"^[ \t]*import\s+machine\b", codigo, re.MULTILINE):
         codigo = "import machine\n" + codigo
