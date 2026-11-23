@@ -2026,10 +2026,10 @@ def salvar_artefatos(escopo: str, arquitetura: str, codigo: str, pedido_usuario:
             shutil.copyfile(uf2_run, uf2_latest)
 
     # 3. Sincroniza diagram.json na raiz do projeto para o simulador da extensão Wokwi (VS Code / Antigravity)
-    if modo_wokwi and diagram_json_str:
+    if modo_wokwi and diagram_str:
         pasta_raiz = os.path.dirname(os.path.abspath(__file__))
         with open(os.path.join(pasta_raiz, "diagram.json"), "w", encoding="utf-8") as f:
-            f.write(diagram_json_str)
+            f.write(diagram_str)
 
     console.print(f"[bold green]✓ Histórico gravado em:[/bold green] [cyan]{pasta_run}/[/cyan]")
     console.print(f"[bold green]✓ Versão mais recente atualizada em:[/bold green] [cyan]{pasta_base}/[/cyan]")

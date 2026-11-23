@@ -1,189 +1,172 @@
 ### Documento de Escopo Técnico
 
-#### Plataforma Alvo:
-- Raspberry Pi Pico (RP2040)
-- MicroPython SDK
+#### 1. Placa Alvo (`wokwi-pi-pico`) e Mapa de Hardware
 
-#### Artefatos de Saída:
-1. **Código-fonte completo em MicroPython** (`main.py` e `driver/ssd1306.py`):
-   - Modularizado e comentado no padrão PEP-8.
-   - Não-bloqueante, usando temporizadores não-bloqueantes com `time.ticks_ms()` e `time.ticks_diff()`.
-   - Sem dependências externas não nativas.
+**Componentes e Pinos Solicitados:**
 
-2. **Arquivo diagram.json válido para o Wokwi Pi Pico**:
-   - Contendo todas as conexões de hardware mapeadas, pronto para execução imediata sem sobreposição de componentes.
+- **Sensor DHT22 (wokwi-dht22)**
+  - VCC -> 3V3
+  - GND -> GND.1
+  - SDA -> GP15
 
-3. **Mapa de Hardware e Pinagem Obrigatória (Pinout RP2040)**:
-   - Listando todos os componentes e pinos solicitados no pedido.
+- **Display OLED SSD1306 (board-ssd1306)**
+  - VCC -> 3V3
+  - GND -> GND.2
+  - SDA -> GP4
+  - SCL -> GP5
 
-#### Componentes Solicitados:
-- Sensor DHT22 (wokwi-dht22)
-  - Função: Leitura de Temperatura (°C) e Umidade (%).
-  - Interface: Digital (1-Wire).
-  - Pinos Obrigatórios:
-    - VCC -> 3V3
-    - GND -> GND.1
-    - SDA -> GP15
+- **LED RGB Cátodo Comum (wokwi-rgb-led)**
+  - COM -> GND.3 (atributo "common": "cathode")
+  - R -> GP16 (via resistor 220 ohms)
+  - G -> GP17 (via resistor 220 ohms)
+  - B -> GP18 (via resistor 220 ohms)
 
-- Display OLED SSD1306 (board-ssd1306)
-  - Função: Exibição do cabeçalho e leituras locais.
-  - Interface: I2C0 (addr 0x3c).
-  - Pinos Obrigatórios:
-    - VCC -> 3V3
-    - GND -> GND.2
-    - SDA -> GP4
-    - SCL -> GP5
+- **Resistores**
+  - 3x resistores de 220 ohms
 
-- LED RGB Cátodo Comum (wokwi-rgb-led)
-  - Função: Sinalização visual por faixas de temperatura e umidade.
-  - Interface: Digital Out.
-  - Pinos Obrigatórios:
-    - COM -> GND.3 (atributo "common": "cathode")
-    - R -> GP16
-    - G -> GP17
-    - B -> GP18
+**Conexões no diagram.json:**
 
-#### Requisitos Funcionais (RF):
-1. **RF01 – Aquisição de Dados do DHT22**:
-   - Ler o sensor DHT22 conectado ao GP15 a cada 2.000 ms.
-
-2. **RF02 – Interface Gráfica no Display OLED I2C (GP4/GP5)**:
-   - Atualizar o display OLED SSD1306 a cada 1.000 ms sem causar cintilação excessiva.
-   - Layout de tela:
-     * Linha 1: "MBA-FIAP" centralizado ou alinhado no topo (y=0), divisória horizontal (y=12).
-     * Linha 2: "Temp: XX.X C".
-     * Linha 3: "Umid: XX.X %".
-
-3. **RF03 – Sinalização Visual via LED RGB (GP16, GP17, GP18)**:
-   - Acionar os canais R, G e B em lógica ativa alta conforme a combinação de Temperatura e Umidade.
-
-4. **RF04 – Telemetria via Console Serial (USB/UART)**:
-   - Imprimir no console serial uma linha JSON compacta contendo o estado atual.
-
-#### Requisitos Não Funcionais (RNF):
-1. **RNF01 – Arquitetura Não-Bloqueante**:
-   - Proibido o uso de `time.sleep()` longo no loop principal.
-   - Escalonamento controlado por temporizadores não-bloqueantes.
-
-2. **RNF02 – Tratamento de Falha de Sensor**:
-   - Exibir "ERRO SENSOR" nas linhas inferiores do OLED e acender LED RGB na cor Magenta se a leitura falhar.
-   - Registrar `temp": null, "hum": null` no console serial.
-
-3. **RNF03 – Fidelidade do diagram.json**:
-   - Usar obrigatoriamente os tipos especificados para componentes e pinos.
-
-#### Restrições de Plataforma:
-- Linguagem: MicroPython nativo para Raspberry Pi Pico (RP2040).
-- Sempre incluir imports usados: `import machine`, `from machine import Pin, I2C`, `import time`, `import json`.
-- Se houver DHT22/DHT11: instanciar obrigatoriamente no escopo global com prefixo do módulo `dht.DHT22(Pin(15))` e ler com `.measure()`, `.temperature()` e `.humidity()`.
-- Se houver OLED SSD1306: usar `from ssd1306 import SSD1306_I2C` e inicializar o I2C informando o ID do barramento 0.
-- Instanciar TODOS os periféricos no escopo global (fora de qualquer função).
-- Para LED RGB: use 3 pinos separados (`led_r = Pin(16, Pin.OUT)`, `led_g = Pin(17, Pin.OUT)`, `led_b = Pin(18, Pin.OUT)`).
-- NUNCA passe tupla para Pin().
-- Inicialize todas as variáveis de telemetria antes do loop while True para evitar UnboundLocalError.
-- Use contadores não-bloqueantes com offset (`last_dht = time.ticks_ms() - 2000`, `last_oled = time.ticks_ms() - 1000`) com `time.ticks_diff()` e `time.sleep_ms(50)` no fim do loop.
-- Proibir importar `Adafruit_*`, `board`, `digitalio` ou `wokwi_gpio`.
-
-#### Placa Alvo (`wokwi-pi-pico`) e Mapa de Hardware:
-1. **Placa alvo**:
-   - Raspberry Pi Pico (RP2040)
-
-2. **Mapa de Hardware**:
-   ```
-   Componente (Wokwi ID) | Função no Sistema | Interface | Pinos Obrigatórios no Pi Pico e Atributos
-   ---------------------|-------------------|----------|-----------------------------------------
-   wokwi-dht22          | DHT22 Sensor      | Digital  | VCC -> 3V3, GND -> GND.1, SDA -> GP15
-   board-ssd1306        | OLED SSD1306     | I2C0    | VCC -> 3V3, GND -> GND.2, SDA -> GP4, SCL -> GP5
-   wokwi-rgb-led         | RGB LED Cátodo Comum | Digital Out| COM -> GND.3 (attrs: {"common": "cathode"}), R -> GP16, G -> GP17, B -> GP18
-   ```
-
-#### Requisitos Funcionais Detalhados:
-- **RF01 – Aquisição de Dados do DHT22**:
-  - Ler o sensor DHT22 a cada 2.000 ms.
-
-- **RF02 – Interface Gráfica no Display OLED I2C (GP4/GP5)**:
-  - Atualizar o display OLED SSD1306 a cada 1.000 ms.
-  - Layout de tela:
-    * Linha 1: "MBA-FIAP" centralizado ou alinhado no topo (y=0), divisória horizontal (y=12).
-    * Linha 2: "Temp: XX.X C".
-    * Linha 3: "Umid: XX.X %".
-
-- **RF03 – Sinalização Visual via LED RGB (GP16, GP17, GP18)**:
-  - Acionar os canais R, G e B em lógica ativa alta conforme a combinação de Temperatura e Umidade.
-
-- **RF04 – Telemetria via Console Serial (USB/UART)**:
-  - Imprimir no console serial uma linha JSON compacta contendo o estado atual.
-
-#### Requisitos Não Funcionais Detalhados:
-1. **RNF01 – Arquitetura Não-Bloqueante**:
-   - Escalonamento controlado por temporizadores não-bloqueantes (`last_dht = time.ticks_ms() - 2000`, `last_oled = time.ticks_ms() - 1000`) com `time.ticks_diff()` e `time.sleep_ms(50)` no fim do loop.
-
-2. **RNF02 – Tratamento de Falha de Sensor**:
-   - Exibir "ERRO SENSOR" nas linhas inferiores do OLED e acender LED RGB na cor Magenta se a leitura falhar.
-   - Registrar `temp": null, "hum": null` no console serial.
-
-3. **RNF03 – Fidelidade do diagram.json**:
-   - Usar obrigatoriamente os tipos especificados para componentes e pinos.
-
-#### Arquivo diagram.json (Exemplo):
 ```json
 {
   "components": [
     {
-      "id": "wokwi-dht22",
-      "type": "sensor",
-      "pins": ["GND.1", "SDA"]
+      "id": "wokwi-pi-pico",
+      "type": "wokwi-pi-pico"
     },
     {
-      "id": "board-ssd1306",
-      "type": "display",
-      "pins": ["VCC", "GND.2", "SDA", "SCL"]
+      "id": "sensor-dht22",
+      "type": "wokwi-dht22",
+      "connections": {
+        "VCC": "3V3",
+        "GND": "GND.1",
+        "SDA": "GP15"
+      }
     },
     {
-      "id": "wokwi-rgb-led",
-      "type": "led",
-      "pins": ["COM", "R", "G", "B"],
-      "attributes": {"common": "cathode"}
+      "id": "display-ssd1306",
+      "type": "board-ssd1306",
+      "connections": {
+        "VCC": "3V3",
+        "GND": "GND.2",
+        "SDA": "GP4",
+        "SCL": "GP5"
+      }
+    },
+    {
+      "id": "led-r",
+      "type": "wokwi-resistor",
+      "value": "220",
+      "connections": {
+        "1": "GND.3",
+        "2": "GP16"
+      }
+    },
+    {
+      "id": "led-g",
+      "type": "wokwi-resistor",
+      "value": "220",
+      "connections": {
+        "1": "GND.3",
+        "2": "GP17"
+      }
+    },
+    {
+      "id": "led-b",
+      "type": "wokwi-resistor",
+      "value": "220",
+      "connections": {
+        "1": "GND.3",
+        "2": "GP18"
+      }
     }
   ]
 }
 ```
 
-#### Código-fonte completo (`main.py`):
+#### 2. Requisitos Funcionais
+
+**RF01 – Aquisição de Dados do DHT22:**
+- Ler o sensor DHT22 conectado ao GP15 a cada 2.000 ms (respeitando o intervalo mínimo de amostragem do sensor).
+
+**RF02 – Interface Gráfica no Display OLED I2C (GP4/GP5):**
+- Atualizar o display OLED SSD1306 (128x64 pixels, endereço I2C 0x3c) a cada 1.000 ms sem causar cintilação excessiva.
+- Layout de tela:
+  - Linha 1 (Cabeçalho): "MBA-FIAP" centralizado ou alinhado no topo (y=0), seguido de uma linha horizontal divisória (y=12).
+  - Linha 2 (Temperatura): "Temp: XX.X C" (y=24).
+  - Linha 3 (Umidade): "Umid: XX.X %" (y=42).
+
+**RF03 – Sinalização Visual via LED RGB (GP16, GP17, GP18):**
+- Acionar os canais R (GP16), G (GP17) e B (GP18) em lógica ativa alta (1 = ligado, 0 = desligado) conforme a combinação de Temperatura (T) e Umidade (U) lidas.
+
+**RF04 – Telemetria via Console Serial (USB/UART):**
+- Imprimir no console serial do Wokwi, a cada 2.000 ms, uma linha JSON compacta contendo o estado atual:
+  ```json
+  {"temp": 24.5, "hum": 55.0, "led_color": "GREEN"}
+  ```
+
+#### 3. Requisitos Não Funcionais e Tratamento de Falhas
+
+**RNF01 – Arquitetura Não-Bloqueante:**
+- Proibido o uso de `time.sleep()` longo no loop principal.
+- O escalonamento da leitura do DHT22 (2.000 ms) e da atualização do display OLED (1.000 ms) deve ser controlado por temporizadores não-bloqueantes utilizando `time.ticks_ms()` e `time.ticks_diff()`.
+
+**RNF02 – Tratamento de Falha de Sensor:**
+- Caso a leitura do DHT22 lance exceção (`OSError`), o sistema não pode travar.
+- Deve exibir "ERRO SENSOR" nas linhas inferiores do OLED (mantendo o cabeçalho "MBA -FIAP").
+- Acender o LED RGB na cor Magenta (R=1, G=0, B=1).
+- Registrar `{"temp": null, "hum": null}` no console serial.
+
+**RNF03 – Fidelidade do diagram.json:**
+- O arquivo `diagram.json` gerado pelo agente deve usar obrigatoriamente os tipos `"wokwi-pi-pico"`, `"wokwi-dht22"`, `"board-ssd1306"`, `"wokwi-rgb-led"` (com `"attrs": {"common": "cathode"}}`).
+- Três `"wokwi-resistor"` ("value": "220").
+- Todos os pinos de alimentação (3V3 e GND) devem estar explicitamente conectados.
+
+#### 4. Restrições de Plataforma
+
+**Linguagem:**
+- MicroPython nativo para Raspberry Pi Pico (RP2040).
+
+**Imports Obrigatórios:**
 ```python
 import machine
-from ssd1306 import SSD1306_I2C
-import dht
+from machine import Pin, I2C
+import time
+import json
+```
 
-# Configurando os pinos dos componentes
+**Instanciamento do Sensor DHT22:**
+```python
+dht_sensor = dht.DHT22(Pin(15))
+```
+
+**Inicialização do OLED SSD1306:**
+```python
+i2c = I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)
+oled = SSD1306_I2C(128, 64, i2c)
+```
+
+**Instanciamento dos Pinos do LED RGB:**
+```python
 led_r = Pin(16, Pin.OUT)
 led_g = Pin(17, Pin.OUT)
 led_b = Pin(18, Pin.OUT)
+```
 
-scl = Pin(5)
-sda = Pin(4)
-i2c = I2C(0, scl=scl, sda=sda, freq=400000)
-
-dht_sensor = dht.DHT22(Pin(15))
-
-# Inicializando o display OLED
-display = SSD1306_I2C(128, 64, i2c)
-
-# Variáveis de telemetria
+**Variáveis de Telemetria:**
+```python
 temp = None
 hum = None
 cor_atual = 'OFF'
-
-# Contadores não-bloqueantes
 last_dht = time.ticks_ms() - 2000
 last_oled = time.ticks_ms() - 1000
+```
 
+**Contadores Não-Bloqueantes com Offset:**
+```python
 while True:
-    # Verificando a leitura do sensor DHT22
-    if time.ticks_diff(time.ticks_ms(), last_dht) >= 2000:
-        dht_sensor.measure()
-        temp = dht_sensor.temperature()
-        hum = dht_sensor.humidity()
+    # Lógica do programa aqui
+    
+    time.sleep_ms(50)
+```
 
-        # Atualizando o display OLED
-        display.fill(0)
+Este documento de escopo técnico garante que todos os requisitos funcionais e não funcionais sejam atendidos, utilizando a plataforma `wokwi-pi-pico` e as bibliotecas padrão do MicroPython para o Raspberry Pi Pico.
