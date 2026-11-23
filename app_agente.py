@@ -61,8 +61,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 console = Console(stderr=True)
 
-OLLAMA_BASE_URL   = "http://localhost:11434"
-OLLAMA_MODEL      = "qwen2.5-coder:3b"
+OLLAMA_BASE_URL   = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL      = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b")
 CONTEXT_WINDOW    = 4096   # Travado — evita crash de VRAM na MX110
 MAX_TENTATIVAS_QA = 3      # Limite de iterações do Loop Dinâmico de Auto-Correção
 
@@ -720,6 +720,16 @@ def sanitizar_codigo_micropython(codigo: str) -> str:
     # Remove parâmetro inválido font=... em text() do framebuf/ssd1306
     codigo = re.sub(r",\s*font\s*=\s*[\w.]+", "", codigo)
 
+    # Remove imports proibidos do CircuitPython alucinados por SLMs
+    codigo = re.sub(r"^[ \t]*(?:import\s+board|from\s+board\s+import\s+.*)\n?", "", codigo, flags=re.MULTILINE)
+    codigo = re.sub(r"^[ \t]*(?:import\s+digitalio|from\s+digitalio\s+import\s+.*)\n?", "", codigo, flags=re.MULTILINE)
+    codigo = re.sub(r"^[ \t]*(?:import\s+analogio|from\s+analogio\s+import\s+.*)\n?", "", codigo, flags=re.MULTILINE)
+    codigo = re.sub(r"^[ \t]*(?:import\s+wokwi_gpio|from\s+wokwi_gpio\s+import\s+.*)\n?", "", codigo, flags=re.MULTILINE)
+
+    # Garante import machine no topo se ausente
+    if not re.search(r"^[ \t]*import\s+machine\b", codigo, re.MULTILINE):
+        codigo = "import machine\n" + codigo
+
     # Remove reimplementação dummy de SSD1306_I2C se o modelo inventou uma classe incompleta
     if re.search(r"class\s+SSD1306_I2C\b", codigo) and "framebuf.FrameBuffer" not in codigo:
         codigo = re.sub(
@@ -1336,6 +1346,11 @@ def executar_loop_qa_e_correcao(
     res_qa = {"aprovado": False}
 
     for tentativa in range(1, MAX_TENTATIVAS_QA + 1):
+        if perfil["modo_wokwi"] and linguagem == "MicroPython":
+            cod_extraido = extrair_bloco_codigo(codigo_atual, arquitetura)
+            cod_sanitizado = sanitizar_codigo_micropython(cod_extraido)
+            codigo_atual = f"```{bloco_md}\n{cod_sanitizado}\n```"
+
         res_qa = executar_verificacao_qa(
             codigo_atual, pedido_usuario, escopo, arquitetura, perfil
         )
