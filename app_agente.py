@@ -158,7 +158,11 @@ def detectar_perfil_projeto(pedido: str) -> dict:
     modo_wokwi = any(k in texto for k in palavras_embarcado)
 
     # Detecção da placa / microcontrolador
-    if "esp32-s3" in texto or "esp32s3" in texto:
+    if "pico w" in texto or "wokwi-pi-pico-w" in texto:
+        board_type, board_id, board_nome = "wokwi-pi-pico-w", "pico", "Raspberry Pi Pico W"
+    elif any(k in texto for k in ("pi pico", "raspberry pi pico", "rp2040", "wokwi-pi-pico")):
+        board_type, board_id, board_nome = "wokwi-pi-pico", "pico", "Raspberry Pi Pico (RP2040)"
+    elif "esp32-s3" in texto or "esp32s3" in texto:
         board_type, board_id, board_nome = "board-esp32-s3-devkitc-1", "esp", "ESP32-S3"
     elif "esp32-c3" in texto or "esp32c3" in texto:
         board_type, board_id, board_nome = "board-esp32-c3-devkitm-1", "esp", "ESP32-C3"
@@ -172,8 +176,6 @@ def detectar_perfil_projeto(pedido: str) -> dict:
         board_type, board_id, board_nome = "wokwi-arduino-uno", "uno", "Arduino Uno"
     elif "stm32" in texto or "nucleo" in texto:
         board_type, board_id, board_nome = "board-stm32-nucleo-c031c6", "stm32", "STM32 Nucleo"
-    elif "pico w" in texto or "wokwi-pi-pico-w" in texto:
-        board_type, board_id, board_nome = "wokwi-pi-pico-w", "pico", "Raspberry Pi Pico W"
     else:
         board_type, board_id, board_nome = "wokwi-pi-pico", "pico", "Raspberry Pi Pico (RP2040)"
 
@@ -372,7 +374,7 @@ def executar_pipeline_wokwi(llm: ChatOllama, pedido_usuario: str) -> tuple[str, 
 
     if linguagem == "MicroPython":
         diretriz_sdk = (
-            "Linguagem: MicroPython nativo para RP2040/ESP32. "
+            f"Linguagem: MicroPython nativo para {board_nome}. "
             "SEMPRE inclua no topo todos os imports usados: `import machine`, `from machine import Pin, I2C`, `import time`, `import json`. "
             "Se houver DHT22/DHT11: faça `import dht` e instancie OBRIGATORIAMENTE com prefixo do módulo `dht.DHT22(Pin(15))` (NUNCA use `DHT22(...)` sem `dht.`), lendo com `.measure()`, `.temperature()` e `.humidity()`. "
             "Se houver OLED SSD1306: use `from ssd1306 import SSD1306_I2C` e inicialize o I2C informando o ID do barramento 0: `I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)`. "
@@ -704,11 +706,15 @@ def _inferir_barramento_i2c_rp2040(match_i2c: re.Match) -> str:
 def sanitizar_codigo_micropython(codigo: str) -> str:
     """
     Normaliza e corrige deslizes de geração de LLMs para MicroPython no Wokwi:
+    - Remove argumentos font=... alucinados por LLMs em display.text().
     - Garante parênteses em .temperature() e .humidity() do módulo dht.
     - Corrige DHT22(...) / DHT11(...) desqualificados para dht.DHT22(...) / dht.DHT11(...).
     - Infere automaticamente o ID do barramento I2C (0 ou 1) no RP2040 quando omitido.
     - Analisa a AST do código e injeta automaticamente qualquer import nativo ausente.
     """
+    # Remove parâmetro inválido font=... em text() do framebuf/ssd1306
+    codigo = re.sub(r",\s*font\s*=\s*[\w.]+", "", codigo)
+
     codigo = re.sub(r"(\bdht\w*\.temperature)(?!\s*\()", r"\1()", codigo)
     codigo = re.sub(r"(\bdht\w*\.humidity)(?!\s*\()", r"\1()", codigo)
 
@@ -1272,7 +1278,7 @@ def executar_loop_qa_e_correcao(
     3. Repete até aprovar ou atingir MAX_TENTATIVAS_QA, aplicando sanitização determinística
        como garantia final.
     """
-    perfil = detectar_perfil_projeto(f"{pedido_usuario}\n{escopo}")
+    perfil = detectar_perfil_projeto(pedido_usuario if pedido_usuario.strip() else escopo)
     board_nome = perfil["board_nome"]
     linguagem = perfil["linguagem"]
     arq_codigo = perfil["arq_codigo"]
@@ -1700,7 +1706,7 @@ def _montar_partes_dinamicas(texto_pedido: str, board_type: str, board_id: str) 
 def salvar_artefatos(escopo: str, arquitetura: str, codigo: str, pedido_usuario: str = ""):
     """Salva os artefatos gerados na pasta 'artifacts/' local (multi-MCU e multi-linguagem)."""
     pasta_base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
-    perfil = detectar_perfil_projeto(f"{pedido_usuario}\n{escopo}")
+    perfil = detectar_perfil_projeto(pedido_usuario if pedido_usuario.strip() else escopo)
     modo_wokwi = perfil["modo_wokwi"]
     arq_codigo = perfil["arq_codigo"]
     linguagem = perfil["linguagem"]

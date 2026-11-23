@@ -1,134 +1,124 @@
-"""
-Monitor Ambiental Simplificado — Raspberry Pi Pico (RP2040) / MicroPython.
-Atende integralmente aos requisitos RF01..RF04 e RNF01..RNF03 no Wokwi.
-"""
-
-import json
-import time
-import dht
 import machine
 from machine import Pin, I2C
+import time
+import json
+import dht
 from ssd1306 import SSD1306_I2C
 
-# =============================================================================
-# Inicialização dos Periféricos (Pinout RP2040 Obrigatório)
-# =============================================================================
-dht_sensor = dht.DHT22(Pin(15))
-i2c = I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)
-display = SSD1306_I2C(128, 64, i2c, addr=0x3C)
+# ==============================================================================
+# Configuração de Pinos e Interfaces de Hardware (RP2040 / Raspberry Pi Pico)
+# ==============================================================================
+PIN_DHT = 15
+PIN_I2C_SDA = 4
+PIN_I2C_SCL = 5
+PIN_LED_R = 16
+PIN_LED_G = 17
+PIN_LED_B = 18
 
-led_r = Pin(16, Pin.OUT)
-led_g = Pin(17, Pin.OUT)
-led_b = Pin(18, Pin.OUT)
+# Configuração do LED RGB (Cátodo comum: 1 = ligado, 0 = desligado)
+led_r = Pin(PIN_LED_R, Pin.OUT)
+led_g = Pin(PIN_LED_G, Pin.OUT)
+led_b = Pin(PIN_LED_B, Pin.OUT)
 
-INTERVALO_DHT_MS = 2000
-INTERVALO_OLED_MS = 1000
+# Configuração do Barramento I2C0 e Display OLED SSD1306 (128x64, addr 0x3c)
+i2c = I2C(0, scl=Pin(PIN_I2C_SCL), sda=Pin(PIN_I2C_SDA), freq=400000)
+display = SSD1306_I2C(128, 64, i2c)
 
-
-def ler_dht22() -> dict:
-    """RF01 & RNF02: Lê temperatura (°C) e umidade (%) do DHT22 no GP15."""
-    try:
-        dht_sensor.measure()
-        temp = round(float(dht_sensor.temperature()), 1)
-        hum = round(float(dht_sensor.humidity()), 1)
-        return {"temp": temp, "hum": hum, "erro": False}
-    except OSError:
-        return {"temp": None, "hum": None, "erro": True}
+# Configuração do Sensor de Temperatura e Umidade DHT22
+dht_sensor = dht.DHT22(Pin(PIN_DHT))
 
 
-def atualizar_led_rgb(dados: dict) -> str:
+# ==============================================================================
+# Funções de Controle de Atuadores e Interface Gráfica
+# ==============================================================================
+def set_led_color(r: int, g: int, b: int):
+    """Atualiza o estado dos canais R, G e B do LED RGB."""
+    led_r.value(1 if r else 0)
+    led_g.value(1 if g else 0)
+    led_b.value(1 if b else 0)
+
+
+def avaliar_clima(temp: float, hum: float) -> tuple[str, int, int, int]:
     """
-    RF03 & RNF02: Atualiza LED RGB (Cátodo Comum, lógica ativa alta)
-    conforme ordem de prioridade de temperatura (T) e umidade (U).
+    Avalia faixas de temperatura e umidade conforme regras de prioridade (RF03):
+    1. Vermelho (Alerta Crítico): T > 30.0 ou U < 30.0
+    2. Azul (Ambiente Frio/Úmido): T < 18.0 ou U > 75.0
+    3. Verde (Conforto Ideal): 18.0 <= T <= 26.0 e 40.0 <= U <= 70.0
+    4. Amarelo (Atenção Moderada): Qualquer outra condição intermediária
     """
-    if dados.get("erro") or dados["temp"] is None or dados["hum"] is None:
-        led_r.value(1)
-        led_g.value(0)
-        led_b.value(1)
-        return "MAGENTA"
-
-    temp = dados["temp"]
-    hum = dados["hum"]
-
-    # 1. Alerta Crítico / Desconforto Severo (Vermelho)
     if temp > 30.0 or hum < 30.0:
-        led_r.value(1)
-        led_g.value(0)
-        led_b.value(0)
-        return "RED"
-
-    # 2. Ambiente Frio / Úmido (Azul)
+        return "RED", 1, 0, 0
     if temp < 18.0 or hum > 75.0:
-        led_r.value(0)
-        led_g.value(0)
-        led_b.value(1)
-        return "BLUE"
-
-    # 3. Faixa de Conforto Ideal (Verde)
-    if 18.0 <= temp <= 26.0 and 40.0 <= hum <= 70.0:
-        led_r.value(0)
-        led_g.value(1)
-        led_b.value(0)
-        return "GREEN"
-
-    # 4. Faixa de Atenção Moderada (Amarelo)
-    led_r.value(1)
-    led_g.value(1)
-    led_b.value(0)
-    return "YELLOW"
+        return "BLUE", 0, 0, 1
+    if (18.0 <= temp <= 26.0) and (40.0 <= hum <= 70.0):
+        return "GREEN", 0, 1, 0
+    return "YELLOW", 1, 1, 0
 
 
-def atualizar_display_oled(dados: dict) -> None:
-    """RF02 & RNF02: Atualiza o display OLED SSD1306 (128x64, I2C0 0x3c)."""
+def renderizar_display(temp: float = None, hum: float = None, erro: bool = False):
+    """Renderiza a interface no display OLED SSD1306 (RF02 e RNF02)."""
     display.fill(0)
-    # Linha 1 (Cabeçalho y=0) + linha horizontal divisória (y=12)
-    display.text("MBA-FIAP", 32, 0, 1)
-    display.line(0, 12, 127, 12, 1)
+    # Cabeçalho fixo (Linha 1) e divisória
+    display.text("MBA-FIAP", 32, 0)
+    display.hline(0, 12, 128, 1)
 
-    if not dados.get("erro") and dados["temp"] is not None and dados["hum"] is not None:
-        # Linha 2 (y=24) e Linha 3 (y=42)
-        display.text(f"Temp: {dados['temp']:.1f} C", 0, 24, 1)
-        display.text(f"Umid: {dados['hum']:.1f} %", 0, 42, 1)
-    else:
-        display.text("ERRO SENSOR", 0, 24, 1)
-        display.text("ERRO SENSOR", 0, 42, 1)
-
+    if erro:
+        display.text("ERRO SENSOR", 20, 32)
+    elif temp is not None and hum is not None:
+        display.text("Temp: {:.1f} C".format(temp), 16, 24)
+        display.text("Umid: {:.1f} %".format(hum), 16, 42)
     display.show()
 
 
-def enviar_telemetria(dados: dict, cor_led: str) -> None:
-    """RF04 & RNF02: Imprime linha JSON compacta no console serial."""
-    payload = {
-        "temp": dados["temp"],
-        "hum": dados["hum"],
-        "led_color": cor_led,
-    }
-    print(json.dumps(payload))
+# ==============================================================================
+# Loop Principal Não-Bloqueante
+# ==============================================================================
+def main():
+    # Inicializa tela e LED
+    renderizar_display(None, None, erro=False)
+    set_led_color(0, 0, 0)
 
+    # Temporizadores não-bloqueantes
+    intervalo_dht_ms = 2000
+    intervalo_oled_ms = 1000
 
-def main() -> None:
-    """RNF01: Loop principal não-bloqueante baseado em ticks_ms e ticks_diff."""
-    agora = time.ticks_ms()
-    ultimo_dht = time.ticks_add(agora, -INTERVALO_DHT_MS)
-    ultimo_oled = time.ticks_add(agora, -INTERVALO_OLED_MS)
+    ultimo_ticks_dht = time.ticks_ms() - intervalo_dht_ms
+    ultimo_ticks_oled = time.ticks_ms() - intervalo_oled_ms
 
-    estado_atual = {"temp": None, "hum": None, "erro": True}
-    cor_led = "MAGENTA"
+    temp_atual = None
+    hum_atual = None
+    cor_atual = "OFF"
+    falha_sensor = False
 
     while True:
         agora = time.ticks_ms()
 
-        # Tarefa de 2.000 ms: Leitura DHT22 + LED RGB + Telemetria Serial
-        if time.ticks_diff(agora, ultimo_dht) >= INTERVALO_DHT_MS:
-            ultimo_dht = agora
-            estado_atual = ler_dht22()
-            cor_led = atualizar_led_rgb(estado_atual)
-            enviar_telemetria(estado_atual, cor_led)
+        # Leitura do DHT22 e Telemetria Serial a cada 2.000 ms (RF01 e RF04)
+        if time.ticks_diff(agora, ultimo_ticks_dht) >= intervalo_dht_ms:
+            ultimo_ticks_dht = agora
+            try:
+                dht_sensor.measure()
+                temp_atual = dht_sensor.temperature()
+                hum_atual = dht_sensor.humidity()
+                falha_sensor = False
+                cor_atual, r, g, b = avaliar_clima(temp_atual, hum_atual)
+                set_led_color(r, g, b)
+                # Telemetria JSON compacta
+                telemetria = {"temp": temp_atual, "hum": hum_atual, "led_color": cor_atual}
+                print(json.dumps(telemetria))
+            except OSError:
+                falha_sensor = True
+                temp_atual = None
+                hum_atual = None
+                cor_atual = "MAGENTA"
+                set_led_color(1, 0, 1)
+                telemetria = {"temp": None, "hum": None, "led_color": "MAGENTA"}
+                print(json.dumps(telemetria))
 
-        # Tarefa de 1.000 ms: Atualização da interface OLED SSD1306
-        if time.ticks_diff(agora, ultimo_oled) >= INTERVALO_OLED_MS:
-            ultimo_oled = agora
-            atualizar_display_oled(estado_atual)
+        # Atualização do Display OLED a cada 1.000 ms (RF02 e RNF02)
+        if time.ticks_diff(agora, ultimo_ticks_oled) >= intervalo_oled_ms:
+            ultimo_ticks_oled = agora
+            renderizar_display(temp_atual, hum_atual, erro=falha_sensor)
 
         time.sleep_ms(50)
 

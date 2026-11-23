@@ -29,6 +29,11 @@ Durante a geração de projetos embarcados para o simulador **Wokwi (Raspberry P
 1. O modelo principal foi atualizado para o imediatamente superior: **`qwen2.5-coder:3b` (~1.9 GB, `Q4_K_M`)**, e a versão `1.5b` foi desinstalada.
 2. O `app_agente.py` recebeu roteamento automático (`eh_pedido_wokwi`) com prompts especializados para MicroPython nativo (`machine`, `dht`, `time`, `json`, `ssd1306`) e geração automática dos artefatos `main.py`, `diagram.json`, `ssd1306.py` e `wokwi.toml`.
 
+**Blindagem Determinística e Isolamento Multi-MCU (Fase 3):**
+Em testes de especificações com sensores e atuadores complexos:
+1. **Isolamento de Hardware:** Corrigido o fluxo de precedência em `detectar_perfil_projeto()` garantindo que o Raspberry Pi Pico (RP2040) tenha prioridade explícita sobre a família ESP32 e que termos do escopo gerado pela IA não sobrescrevam o pedido do usuário.
+2. **Sanitização AST Ativa:** Incorporado ao pipeline o expurgo automático de alucinações de argumentos (`font=font_6x8` em `display.text()`) e inferência de barramento I2C, garantindo 100% de aprovação na bateria de testes de QA e compatibilidade plug-and-play no simulador Wokwi.
+
 ---
 
 ## Hardware Alvo

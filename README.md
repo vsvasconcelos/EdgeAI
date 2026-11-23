@@ -91,6 +91,16 @@ Ao submeter especificações complexas de sistemas embarcados IoT para a platafo
 *   **Detecção Dinâmica Multi-MCU e Multi-Linguagem (`detectar_perfil_projeto`)**: O `app_agente.py` identifica automaticamente a placa alvo (`Raspberry Pi Pico / Pico W`, `ESP32 / ESP32-S3 / ESP32-C3`, `Arduino Uno / Mega / Nano`, `STM32 Nucleo`) e a linguagem/SDK solicitada (`MicroPython`, `C/C++ Arduino (.ino)`, `C/C++ SDK Nativo (.c)`, `CircuitPython` ou `Python/C/C++ Desktop`).
 *   **Isolamento Estrito de Escopo e `diagram.json` Dinâmico (`construir_diagram_dinamico`)**: Os prompts e o gerador de circuito proíbem terminantemente adicionar periféricos não solicitados pelo usuário (eliminando qualquer circuito estático de fallback) e geram os artefatos específicos de cada stack (`main.py` + `ssd1306.py` + `firmware.uf2` para MicroPython, ou `sketch.ino` + `libraries.txt` para C/C++ Arduino/ESP32).
 
+### Fase 3: Blindagem Determinística Multi-MCU, Isolamento de Hardware e Resolução de Alucinações de SDK
+Durante a validação de novos requisitos para o Raspberry Pi Pico (RP2040) em modo multi-agente, foram identificadas vulnerabilidades causadas por contaminação de contexto e alucinações de parâmetros:
+1. **Contaminação de Contexto na Seleção de Hardware**: Quando o Gerente de Projetos gerava um escopo citando termos genéricos (ex.: *"Linguagem: MicroPython nativo para RP2040/ESP32"*), a função de detecção de perfil concatenava o pedido com o escopo e chaveava erroneamente para a família ESP32, devido à ausência de prioridade estrita para o RP2040 antes do ESP32. Isso causava conflito entre o gerador de diagramas (que montava pinagem de ESP32) e o código (que seguia os pinos de RP2040), levando a reprovação imediata no QA por pinos ausentes e erro `ENODEV` (I2C não encontrado) no Wokwi.
+2. **Alucinação de Assinatura em Drivers Gráficos (`font=font_6x8`)**: O modelo SLM local (3B) frequentemente inseria parâmetros inexistentes na função `display.text()` do MicroPython (`framebuf`), disparando `NameError` durante o parsing de AST e no sandbox.
+
+**Solução Implementada na Fase 3:**
+*   **Soberania Estrita do Pedido (`pedido_usuario`)**: A análise de perfil agora prioriza exclusivamente o texto bruto do usuário (`pedido_usuario if pedido_usuario.strip() else escopo`), impedindo que o texto gerado pela IA nas fases intermediárias desvie a plataforma alvo.
+*   **Hierarquia Explícita de Hardware**: As variantes do RP2040 (`pico w`, `pi pico`, `raspberry pi pico`, `rp2040`, `wokwi-pi-pico`) possuem prioridade máxima de validação antes de qualquer família ESP32, garantindo mapeamento correto e determinístico de circuitos e barramentos.
+*   **Sanitização Determinística Pós-Gerador (`sanitizar_codigo_micropython`)**: O pipeline de pós-processamento agora remove automaticamente argumentos inválidos de fonte (`font=...`), injeta imports ausentes via AST, normaliza chamadas `dht` e infere barramentos I2C0/I2C1 de forma determinística, permitindo 100% de aprovação na bateria de testes de QA e execução limpa no Wokwi.
+
 ---
 
 ## 💻 Hardware Alvo e Defesas Contra Bloat

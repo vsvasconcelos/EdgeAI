@@ -1,67 +1,218 @@
-### Documento de Escopo Técnico
+### Documento de Escopo: Monitor Ambiental Simplificado (Raspberry Pi Pico)
 
 #### Plataforma Alvo:
 - Raspberry Pi Pico (RP2040)
-- MicroPython
+- Linguagem / SDK: MicroPython
 
 #### Artefatos de Saída:
 
-1. **Código-fonte completo em MicroPython** (`main.py` e `driver/ssd1306.py`):
-   - Modularizado e comentado no padrão PEP-8.
-   - Não-bloqueante, usando temporizadores não-bloqueantes com `time.ticks_ms()` e `time.ticks_diff()`.
-   - Sem dependências externas não nativas.
+1. **Código-fonte completo, modularizado e comentado no padrão PEP-8**:
+   - `main.py`: Contém a lógica principal do agente.
+   - `driver/ssd1306.py`: Módulo que implementa a classe `SSD1306_I2C` para o display OLED SSD1306.
 
-2. **Arquivo diagram.json válido para o Wokwi Pi Pico**:
-   - Contendo todas as conexões de hardware mapeadas, pronto para execução imediata sem sobreposição de componentes.
-   - Fidelidade ao diagram.json: Usando obrigatoriamente os tipos "wokwi-pi-pico", "wokwi-dht22", "board-ssd1306", "wokwi-rgb-led" (com "attrs": {"common": "cathode"}) e três "wokwi-resistor" ("value": "220").
-   - Pinos de alimentação (3V3 e GND) explicitamente conectados.
+2. **Arquivo diagram.json válido**:
+   - Contém todas as conexões de hardware mapeadas conforme especificado no pedido, pronto para execução imediata no simulador Wokwi (wokwi-pi-pico).
 
 #### Mapa de Hardware e Pinagem Obrigatória:
 
 | Componente (Wokwi ID) | Função no Sistema | Interface | Pinos Obrigatórios no Pi Pico e Atributos |
-|-----------------------|-------------------|----------|----------------------------------------|
+|-----------------------|------------------|----------|----------------------------------------|
 | wokwi-dht22          | Leitura de Temperatura (°C) e Umidade (%) | Digital (1-Wire) | VCC -> 3V3, GND -> GND.1, SDA -> GP15 |
-| board-ssd1306        | Exibição do cabeçalho e leituras locais | I2C0 (addr 0x3c) | VCC -> 3V3, GND -> GND.2, SDA -> GP4, SCL -> GP5 |
-| wokwi-rgb-led        | Sinalização visual por faixas de temperatura e umidade | Digital Out | COM -> GND.3 (atributo "common": "cathode"), R -> GP16 (via resistor 220 ohms), G -> GP17 (via resistor 220 ohms), B -> GP18 (via resistor 220 ohms) |
+| board-ssd1306       | Exibição do cabeçalho e leituras locais | I2C0 (addr 0x3c) | VCC -> 3V3, GND -> GND.2, SDA -> GP4, SCL -> GP5 |
+| wokwi-rgb-led       | Sinalização visual por faixas de temperatura e umidade | Digital Out | COM -> GND.3 (atributo "common": "cathode"), R -> GP16 (via resistor 220 ohms), G -> GP17 (via resistor 220 ohms), B -> GP18 (via resistor 220 ohms) |
 
-#### Requisitos Funcionais:
+#### Requisitos Funcionais (RF):
 
 1. **RF01 – Aquisição de Dados do DHT22**:
    - Ler o sensor DHT22 conectado ao GP15 a cada 2.000 ms.
 
 2. **RF02 – Interface Gráfica no Display OLED I2C (GP4/GP5)**:
-   - Atualizar o display OLED SSD1306 (128x64 pixels, endereço I2C 0x3c) a cada 1.000 ms.
+   - Atualizar o display OLED SSD1306 a cada 1.000 ms.
    - Layout de tela:
-     * Linha 1: "MBA-FIAP" centralizado ou alinhado no topo (y=0), linha horizontal divisória (y=12).
-     * Linha 2: "Temp: XX.X C" (y=24).
-     * Linha 3: "Umid: XX.X %" (y=42).
+     * Linha 1: "MBA-FIAP" centralizado ou alinhado no topo, divisória horizontal em y=12.
+     * Linha 2: "Temp: XX.X C".
+     * Linha 3: "Umid: XX.X %".
 
 3. **RF03 – Sinalização Visual via LED RGB (GP16, GP17, GP18)**:
-   - Acionar os canais R, G e B em lógica ativa alta conforme a combinação de Temperatura (T) e Umidade (U), obedecendo à seguinte ordem de prioridade:
-     1. Alerta Crítico / Desconforto Severo: Cor Vermelha -> R=1, G=0, B=0.
-     2. Ambiente Frio / Úmido: Cor Azul -> R=0, G=0, B=1.
-     3. Faixa de Conforto Ideal: Cor Verde -> R=0, G=1, B=0.
-     4. Faixa de Atenção Moderada: Cor Amarela -> R=1, G=1, B=0.
+   - Acionar os canais R, G e B em lógica ativa alta conforme a combinação de Temperatura (T) e Umidade (U).
 
 4. **RF04 – Telemetria via Console Serial (USB/UART)**:
-   - Imprimir no console serial do Wokwi a cada 2.000 ms, uma linha JSON compacta contendo o estado atual: `{"temp": XX.X, "hum": XX.X, "led_color": "COLOR"}`.
+   - Imprimir no console serial uma linha JSON compacta a cada 2.000 ms.
 
-#### Requisitos Não Funcionais:
+#### Requisitos Não Funcionais (RNF):
 
 1. **RNF01 – Arquitetura Não-Bloqueante**:
    - Proibido o uso de `time.sleep()` longo no loop principal.
-   - Escalonamento da leitura do DHT22 (2.000 ms) e atualização do display OLED (1.000 ms) controlado por temporizadores não-bloqueantes utilizando `time.ticks_ms()` e `time.ticks_diff()`.
+   - Escalonamento controlado por temporizadores não-bloqueantes utilizando `time.ticks_ms()`, `time.ticks_diff()` e `time.sleep_ms(50)`.
 
 2. **RNF02 – Tratamento de Falha de Sensor**:
-   - Caso a leitura do DHT22 lance exceção (`OSError`), o sistema deve exibir "ERRO SENSOR" nas linhas inferiores do OLED (mantendo o cabeçalho "MBA-FIAP"), acender o LED RGB na cor Magenta (R=1, G=0, B=1) e registrar `{"temp": null, "hum": null}` no console serial.
+   - Exibir "ERRO SENSOR" nas linhas inferiores do OLED.
+   - Acender o LED RGB na cor Magenta (R=1, G=0, B=1).
+   - Registrar `{"temp": null, "hum": null}` no console serial.
 
 3. **RNF03 – Fidelidade do diagram.json**:
-   - O arquivo diagram.json gerado pelo agente deve usar obrigatoriamente os tipos "wokwi-pi-pico", "wokwi-dht22", "board-ssd1306", "wokwi-rgb-led" (com "attrs": {"common": "cathode"}) e três "wokwi-resistor" ("value": "220").
-   - Pinos de alimentação (3V3 e GND) explicitamente conectados.
+   - Usar obrigatoriamente os tipos "wokwi-pi-pico", "wokwi-dht22", "board-ssd1306", "wokwi-rgb-led" (com "attrs": {"common": "cathode"}) e três "wokwi-resistor".
+   - Todos os pinos de alimentação (3V3 e GND) devem estar explicitamente conectados.
 
 #### Restrições de Plataforma:
-- Linguagem: MicroPython nativo (`from machine import ...`, `import time`, `import json`).
-- Se houver DHT22/DHT11 use `import dht` com `.measure()`, `.temperature()` e `.humidity()`.
-- Se houver OLED SSD1306 use `from ssd1306 import SSD1306_I2C`.
-- Use temporização não-bloqueante com `time.ticks_ms()` e `time.ticks_diff()`.
+- Linguagem: MicroPython nativo para RP2040/ESP32.
 - Proibido importar `Adafruit_*`, `board`, `digitalio` ou `wokwi_gpio`.
+
+### Entregáveis:
+
+1. **Placa alvo (`wokwi-pi-pico`) e Mapa de Hardware**:
+   - Contém somente os componentes solicitados no pedido.
+
+2. **Requisitos Funcionais detalhados**:
+   - Intervalos de leitura: DHT22 (2000 ms), Display OLED (1000 ms).
+   - Lógica de acionamento do LED RGB conforme as condições de temperatura e umidade.
+   - Interface/display: Layout especificado no pedido.
+   - Telemetria serial: JSON compacto com estado atual.
+
+3. **Requisitos Não Funcionais e Tratamento de Falhas**:
+   - Arquitetura não-bloqueante utilizando temporizadores não-bloqueantes.
+   - Tratamento de falha do sensor (exibir erro, acender LED RGB, registrar no console serial).
+
+4. **Restrições de Plataforma**:
+   - Linguagem: MicroPython nativo para RP2040/ESP32.
+   - Proibido importar bibliotecas específicas.
+
+### Código-fonte completo (main.py):
+
+```python
+import machine
+from machine import Pin, I2C
+import time
+import json
+
+# Configuração do sensor DHT22
+dht_sensor = dht.DHT22(Pin(15))
+
+# Configuração do display OLED SSD1306
+i2c = I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)
+display = SSD1306_I2C(128, 64, i2c)
+
+# Configuração do LED RGB Cátodo Comum
+led_r = Pin(16, Pin.OUT)
+led_g = Pin(17, Pin.OUT)
+led_b = Pin(18, Pin.OUT)
+
+def display_header():
+    display.fill(0)  # Limpa o display
+    display.text("MBA-FIAP", 24, 0, font=font_6x8)
+    display.hline(0, 12, 128, 1)  # Linha horizontal divisória
+
+def update_display(temp, hum):
+    display.fill(0)  # Limpa o display
+    display.text("MBA-FIAP", 24, 0, font=font_6x8)
+    display.hline(0, 12, 128, 1)  # Linha horizontal divisória
+    display.text(f"Temp: {temp:.1f} C", 24, 24, font=font_6x8)
+    display.text(f"Umid: {hum:.1f} %", 24, 42, font=font_6x8)
+
+def set_led_color(color):
+    led_r.value(0 if color & 0b001 else 1)
+    led_g.value(0 if color & 0b010 else 1)
+    led_b.value(0 if color & 0b100 else 1)
+
+def main():
+    while True:
+        try:
+            dht_sensor.measure()
+            temp = dht_sensor.temperature()
+            hum = dht_sensor.humidity()
+
+            # Atualiza o display
+            update_display(temp, hum)
+
+            # Define a cor do LED RGB com base nas condições de temperatura e umidade
+            color = 0
+            if temp > 30.0:
+                color |= 0b001  # Vermelho
+            elif temp < 18.0:
+                color |= 0b010  # Verde
+            elif hum > 60.0:
+                color |= 0b100  # Azul
+
+            set_led_color(color)
+
+        except OSError as e:
+            display.fill(0)  # Limpa o display
+            display.text("ERRO SENSOR", 24, 0, font=font_6x8)
+            led_r.value(1)
+            led_g.value(1)
+            led_b.value(1)
+
+        time.sleep_ms(50)
+
+if __name__ == "__main__":
+    main()
+```
+
+### Módulo `driver/ssd1306.py`:
+
+```python
+from ssd1306 import SSD1306_I2C
+
+class SSD1306_I2C(SSD1306_I2C):
+    def __init__(self, width, height, i2c, addr=0x3c):
+        super().__init__(width, height, i2c, addr)
+```
+
+### Diagrama de Hardware (diagram.json):
+
+```json
+{
+  "components": [
+    {
+      "id": "wokwi-dht22",
+      "type": "dht22",
+      "pin": 15,
+      "vcc": 3.3,
+      "gnd": 0
+    },
+    {
+      "id": "board-ssd1306",
+      "type": "ssd1306_i2c",
+      "i2c": 0,
+      "scl": 5,
+      "sda": 4,
+      "addr": 0x3c
+    },
+    {
+      "id": "wokwi-rgb-led",
+      "type": "led_rgb_cathode",
+      "pin_r": 16,
+      "pin_g": 17,
+      "pin_b": 18,
+      "common": "cathode"
+    }
+  ],
+  "connections": [
+    {
+      "from": "wokwi-dht22.vcc",
+      "to": "board-ssd1306.i2c.scl"
+    },
+    {
+      "from": "wokwi-dht22.gnd",
+      "to": "board-ssd1306.i2c.sda"
+    },
+    {
+      "from": "wokwi-dht22.vcc",
+      "to": "wokwi-rgb-led.pin_r"
+    },
+    {
+      "from": "wokwi-dht22.gnd",
+      "to": "wokwi-rgb-led.pin_g"
+    },
+    {
+      "from": "wokwi-dht22.gnd",
+      "to": "wokwi-rgb-led.pin_b"
+    }
+  ]
+}
+```
+
+### Fontes:
+- `font_6x8`: Fonte para exibição de texto no display OLED.
+
+Este documento fornece uma descrição detalhada do projeto, incluindo os artefatos de sa
