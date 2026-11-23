@@ -3,7 +3,7 @@ import requests
 resposta = requests.post(
     "http://127.0.0.1:11434/api/generate",
     json={
-        "model": "qwen2.5-coder:3b",
+        "model": "qwen2.5-coder:7b",
         "prompt": "Escreva uma busca binária em Python",
         "stream": False
     }

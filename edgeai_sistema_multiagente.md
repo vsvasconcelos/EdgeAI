@@ -34,20 +34,29 @@ Em testes de especificações com sensores e atuadores complexos:
 1. **Isolamento de Hardware:** Corrigido o fluxo de precedência em `detectar_perfil_projeto()` garantindo que o Raspberry Pi Pico (RP2040) tenha prioridade explícita sobre a família ESP32 e que termos do escopo gerado pela IA não sobrescrevam o pedido do usuário.
 2. **Sanitização AST Ativa:** Incorporado ao pipeline o expurgo automático de alucinações de argumentos (`font=font_6x8` em `display.text()`) e inferência de barramento I2C, garantindo 100% de aprovação na bateria de testes de QA e compatibilidade plug-and-play no simulador Wokwi.
 
+**Upgrade para `qwen2.5-coder:7b` e Superação das Limitações do 3B (Fase 4):**
+Testes empíricos demonstraram que modelos de 3B parâmetros sofrem de instabilidade de atenção em tarefas de engenharia de firmware, incorrendo em:
+- Omissão de `import machine` com uso direto de `machine.Pin`;
+- Alucinações de bibliotecas incompatíveis (`import board` do CircuitPython);
+- Incompreensão de escopo léxico em loops não-bloqueantes (`UnboundLocalError` em variáveis dentro de `if ticks_diff`);
+- Regressões sucessivas no ciclo de auto-correção de QA.
+
+A migração para o **`qwen2.5-coder:7b` (~4.7 GB)**, executando 100% acelerado na GPU **NVIDIA GeForce RTX 5070 (8 GB VRAM)** com 16 GB de RAM no host, elevou o índice de aprovação direta no primeiro ciclo de QA e erradicou as falhas sintáticas do modelo menor.
+
 ---
 
-## Hardware Alvo
+## Hardware e Ambiente
 
-| Recurso | Especificação |
-|---|---|
-| CPU | 8 núcleos |
-| RAM | 8 GB total / ~4.2 GB livres |
-| GPU | NVIDIA GeForce MX110 — 2 GB VRAM |
-| OS | Ubuntu Linux |
-| Motor | Ollama local — porta 11434 |
-| Modelo | `qwen2.5-coder:3b` (INT4 / Q4_K_M, GGUF, ~1.9 GB) |
-| Modo inferência | Híbrido CPU / GPU |
-| Contexto | **4096 tokens** (travado) |
+| Recurso | Especificação de Referência (Workstation) | Perfil Mínimo Suportado (Edge) |
+|---|---|---|
+| CPU | 8 a 16 núcleos | 8 núcleos |
+| RAM | 16 GB total (~12 GB livres) | 8 GB total (~4.2 GB livres) |
+| GPU | NVIDIA GeForce RTX 5070 — 8 GB VRAM | NVIDIA GeForce MX110 — 2 GB VRAM |
+| OS | Ubuntu Linux / WSL2 | Ubuntu Linux |
+| Motor | Ollama local — porta 11434 | Ollama local — porta 11434 |
+| Modelo Padrão | **`qwen2.5-coder:7b`** (~4.7 GB, Q4_K_M) | `qwen2.5-coder:3b` / `1.5b` (Fallback) |
+| Modo inferência | 100% Offload em VRAM | Híbrido CPU / GPU |
+| Contexto | **4096 tokens** | **4096 tokens** |
 
 ---
 

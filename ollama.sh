@@ -18,14 +18,14 @@ usage() {
   echo "Comandos disponíveis:"
   echo "  serve          Inicia o servidor Ollama em background"
   echo "  stop           Para o servidor Ollama"
-  echo "  pull [modelo]  Baixa um modelo no Ollama local (padrão: qwen2.5-coder:3b)"
+  echo "  pull [modelo]  Baixa um modelo no Ollama local (padrão: qwen2.5-coder:7b)"
   echo "  rm [modelo]    Remove um modelo do Ollama local"
-  echo "  run [prompt]   Executa uma consulta ao modelo Qwen2.5-Coder:3b"
+  echo "  run [prompt]   Executa uma consulta ao modelo Qwen2.5-Coder:7b"
   echo "  list           Lista os modelos instalados"
   echo "  ps             Lista os modelos carregados em memória"
   echo "  status         Verifica se o servidor está rodando"
   echo "  logs           Exibe os logs do servidor"
-  echo "  chat           Abre chat interativo com Qwen2.5-Coder:3b"
+  echo "  chat           Abre chat interativo com Qwen2.5-Coder:7b"
   echo ""
 }
 
@@ -66,13 +66,13 @@ case "$1" in
       echo "[Ollama] Erro: forneça um prompt."
       exit 1
     fi
-    "$OLLAMA_BIN" run qwen2.5-coder:3b "$*"
+    "$OLLAMA_BIN" run qwen2.5-coder:7b "$*"
     ;;
 
   chat)
-    echo "[Ollama] Abrindo chat interativo com qwen2.5-coder:3b"
+    echo "[Ollama] Abrindo chat interativo com qwen2.5-coder:7b"
     echo "[Ollama] Digite /bye para sair."
-    "$OLLAMA_BIN" run qwen2.5-coder:3b
+    "$OLLAMA_BIN" run qwen2.5-coder:7b
     ;;
 
   list)
@@ -110,7 +110,7 @@ case "$1" in
 
   pull)
     shift
-    MODEL="${1:-qwen2.5-coder:3b}"
+    MODEL="${1:-qwen2.5-coder:7b}"
     "$OLLAMA_BIN" pull "$MODEL"
     ;;
 

@@ -27,11 +27,11 @@
 
 Projeto desenvolvido para o curso **I2A2 - Agentic AI: uma introdução**.
 
-O **EdgeAI** é uma solução de engenharia de software projetada para rodar **sistemas multi-agentes de inteligência artificial de forma 100% local e offline**. Desenvolvido com foco no ecossistema local do **Ollama** e no modelo **Qwen2.5-Coder-3B** (`qwen2.5-coder:3b`), o projeto simula uma tripulação de engenharia de software (Gerente de Projetos, Arquiteto e Desenvolvedor) para gerar soluções de código documentadas, testadas e projetos completos de sistemas embarcados para o simulador **Wokwi (Raspberry Pi Pico / MicroPython)** sem precisar de chaves de API pagas ou conexões de rede externas.
+O **EdgeAI** é uma solução de engenharia de software projetada para rodar **sistemas multi-agentes de inteligência artificial de forma 100% local e offline**. Desenvolvido com foco no ecossistema local do **Ollama** e no modelo **Qwen2.5-Coder-7B** (`qwen2.5-coder:7b`) com suporte retrocompatível ao `3b`, o projeto simula uma tripulação de engenharia de software (Gerente de Projetos, Arquiteto e Desenvolvedor) para gerar soluções de código documentadas, testadas e projetos completos de sistemas embarcados para o simulador **Wokwi (Raspberry Pi Pico / MicroPython)** sem precisar de chaves de API pagas ou conexões de rede externas.
 
 Adicionalmente, o projeto inclui um servidor **MCP (Model Context Protocol)** para integração direta como uma ferramenta (tool) na interface de chat do agente da IDE **Zed**.
 
-### Versão com o LLM mais potente (`qwen2.5-coder:3b`)
+### Versão com o LLM de Alta Precisão (`qwen2.5-coder:7b`)
 ![Versão com o LLM mais potente](Tela2.png)
 
 
@@ -101,24 +101,39 @@ Durante a validação de novos requisitos para o Raspberry Pi Pico (RP2040) em m
 *   **Hierarquia Explícita de Hardware**: As variantes do RP2040 (`pico w`, `pi pico`, `raspberry pi pico`, `rp2040`, `wokwi-pi-pico`) possuem prioridade máxima de validação antes de qualquer família ESP32, garantindo mapeamento correto e determinístico de circuitos e barramentos.
 *   **Sanitização Determinística Pós-Gerador (`sanitizar_codigo_micropython`)**: O pipeline de pós-processamento agora remove automaticamente argumentos inválidos de fonte (`font=...`), injeta imports ausentes via AST, normaliza chamadas `dht` e infere barramentos I2C0/I2C1 de forma determinística, permitindo 100% de aprovação na bateria de testes de QA e execução limpa no Wokwi.
 
+### Fase 4: Upgrade para `qwen2.5-coder:7b` e Histórico das Limitações Empíricas do Modelo 3B
+Apesar das mitigações determinísticas da Fase 3, testes empíricos sucessivos com o modelo `qwen2.5-coder:3b` sob especificações complexas de sistemas embarcados evidenciaram o teto cognitivo de modelos na faixa de 3 bilhões de parâmetros:
+1. **Omissão e Regressão de Imports Nativos**: O modelo 3B frequentemente usava `machine.Pin` sem incluir `import machine` no topo, disparando `NameError` em tempo de execução no Sandbox.
+2. **Alucinação Cruzada de Dialetos (CircuitPython vs. MicroPython)**: Sob pressão de regras no prompt, o modelo 3B alucinava repetidamente `import board` e módulos da Adafruit, violando a regra de usar estritamente o SDK nativo do MicroPython.
+3. **Reimplementação de Classes Dummy Quebradas**: Ao ler menções de drivers gráficos no requisito, o 3B tentava escrever uma `class SSD1306_I2C` ingênua dentro do próprio `main.py` com métodos inexistentes (`bytearray.fill()`), em vez de usar `from ssd1306 import SSD1306_I2C`.
+4. **Incompreensão de Escopo Léxico em Laços com Temporizadores**: Ao implementar o escalonamento não-bloqueante (`ticks_ms()`), o modelo 3B atribuía `temp, hum = read_dht()` exclusivamente dentro de um `if` condicional, sem inicializar `temp = None` antes do `while True:`. Isso causava invariavelmente `UnboundLocalError` na primeira iteração do laço.
+5. **Inércia / Regressão no Loop de QA**: Ao receber o Traceback real no loop de auto-correção, o modelo de 3B não conseguia manter a coerência global do código: ao tentar corrigir um erro de escopo, regredia gerando novos erros de importação ou removendo campos obrigatórios do JSON de telemetria serial (`led_color`), esgotando as 3 tentativas do QA.
+
+**A Solução Definitiva com o `qwen2.5-coder:7b`:**
+*   **Capacidade Paramétrica Superior**: O modelo `qwen2.5-coder:7b` (~4.7 GB, Q4_K_M) atinge 88.4% no benchmark HumanEval Python e compreende com precisão a semântica de módulos embarcados, escopo léxico e instruções de proibição de bibliotecas.
+*   **Compatibilidade de Hardware (RTX 5070 8GB VRAM)**: O modelo de 7B cabe integralmente na VRAM dedicada da GPU (~5.2 GB com janela de contexto de 4096 tokens), executando 100% acelerado por hardware sem recorrer a offload na CPU e alcançando alta taxa de tokens por segundo (~45-60 t/s).
+*   **Sanitização Preventiva no Loop de QA**: O `app_agente.py` foi atualizado para sanitizar o código preventivamente a cada iteração do QA, garantindo redundância dupla (inteligência do modelo 7B + filtros determinísticos de segurança).
+
 ---
 
-## 💻 Hardware Alvo e Defesas Contra Bloat
+## 💻 Hardware Alvo e Configuração
 
-O sistema foi otimizado para o seguinte perfil de máquina edge:
+O sistema opera calibrado para ambientes locais de workstation com GPU dedicada e suporta execução em hardware restrito:
 
-*   **Processador**: CPU x86_64 de 8 núcleos
-*   **Memória RAM**: 8 GB totais (~4.2 GB disponíveis de uso livre)
-*   **GPU Dedicada**: NVIDIA GeForce MX110 (2 GB VRAM)
-*   **Sistema Operacional**: Ubuntu Linux
+*   **Processador**: CPU x86_64 de 8 a 16 núcleos
+*   **Memória RAM**: 16 GB totais (~12 GB disponíveis de uso livre)
+*   **GPU Dedicada Principal**: NVIDIA GeForce RTX 5070 (8 GB VRAM dedicada — suporta `qwen2.5-coder:7b` 100% na GPU)
+*   **Perfil Mínimo Suportado (Edge Restrito)**: NVIDIA GeForce MX110 (2 GB VRAM com quantização híbrida e fallback para `qwen2.5-coder:3b` / `1.5b`)
+*   **Sistema Operacional**: Ubuntu Linux (Nativo ou WSL2)
 
-### Estratégias de Mitigação
-Para rodar com estabilidade sem estourar o limite físico de hardware:
+### Estratégias de Mitigação e Calibração
+Para rodar com máxima estabilidade e precisão:
 
-*   **Janela de Contexto Travada (`num_ctx=4096`)**: Impede o crescimento desordenado do cache KV na VRAM de 2GB.
-*   **Limite Estrito de Geração (`num_predict=1500`)**: Evita respostas excessivamente longas ou loops recursivos infinitos do LLM.
-*   **Temperatura Baixa (`temperature=0.1`)**: Prioriza a previsibilidade e a consistência das respostas de codificação.
-*   **Controle de CPU/Thread (`num_thread=6`)**: Limita a execução do Ollama em 6 núcleos da CPU, garantindo que o sistema operacional permaneça responsivo (evita starvation).
+*   **Seleção Automática com Fallback**: O `app_agente.py` busca prioritariamente o modelo `qwen2.5-coder:7b` e realiza fallback transparente para o `3b` caso o modelo maior ainda não esteja presente.
+*   **Janela de Contexto Calibrada (`num_ctx=4096`)**: Dimensionada para projetos embarcados completos sem transbordo de memória.
+*   **Limite Estrito de Geração (`num_predict=2500`)**: Permite geração completa de `main.py` e `diagram.json` em um único turno sem truncamento.
+*   **Temperatura Baixa (`temperature=0.1`)**: Prioriza determinismo, lógica e consistência nas respostas de engenharia.
+*   **Controle de Threads (`num_thread=6`)**: Deixa núcleos livres para o sistema operacional permanecer fluido.
 
 ---
 

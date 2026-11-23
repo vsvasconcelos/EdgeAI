@@ -60,7 +60,7 @@
     "reveal": "always"
   },
   {
-    "label": "⬇️ EdgeAI — Baixar Modelo qwen2.5-coder:3b",
+    "label": "⬇️ EdgeAI — Baixar Modelo qwen2.5-coder:7b",
     "command": "wsl.exe",
     "args": [
       "-d",

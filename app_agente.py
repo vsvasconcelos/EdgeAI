@@ -62,8 +62,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 console = Console(stderr=True)
 
 OLLAMA_BASE_URL   = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL      = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:3b")
-CONTEXT_WINDOW    = 4096   # Travado — evita crash de VRAM na MX110
+OLLAMA_MODEL      = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")
+CONTEXT_WINDOW    = 4096   # Calibrado para RTX 5070 / Edge AI
 MAX_TENTATIVAS_QA = 3      # Limite de iterações do Loop Dinâmico de Auto-Correção
 
 
@@ -72,26 +72,37 @@ MAX_TENTATIVAS_QA = 3      # Limite de iterações do Loop Dinâmico de Auto-Cor
 # =============================================================================
 
 def verificar_ollama() -> bool:
-    """Verifica se o Ollama está rodando e o modelo está disponível."""
+    """Verifica se o Ollama está rodando e o modelo está disponível (com fallback para 3b se 7b estiver baixando)."""
+    global OLLAMA_MODEL
     try:
-        resp = requests.get("http://localhost:11434/api/tags", timeout=5)
+        resp = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
         if resp.status_code != 200:
             return False
         modelos = [m["name"] for m in resp.json().get("models", [])]
-        disponivel = any(OLLAMA_MODEL in m for m in modelos)
-        if disponivel:
-            console.print(
-                f"[bold green]✓ Ollama OK[/bold green] — modelo "
-                f"[cyan]{OLLAMA_MODEL}[/cyan] disponível."
-            )
-        else:
+        
+        # Se o modelo desejado (ex: 7b) ainda não foi baixado, mas o 3b está presente, faz fallback transparente
+        if not any(OLLAMA_MODEL in m for m in modelos):
+            if OLLAMA_MODEL == "qwen2.5-coder:7b" and any("qwen2.5-coder:3b" in m for m in modelos):
+                console.print(
+                    "[bold yellow]⚠ Modelo [cyan]qwen2.5-coder:7b[/cyan] ainda não finalizou o download. "
+                    "Utilizando fallback temporário para [cyan]qwen2.5-coder:3b[/cyan].[/bold yellow]"
+                )
+                OLLAMA_MODEL = "qwen2.5-coder:3b"
+                return True
+
             console.print(
                 f"[bold yellow]⚠ Modelo [cyan]{OLLAMA_MODEL}[/cyan] "
                 f"não encontrado.[/bold yellow]\n"
                 f"  Execute: [bold]./ollama.sh pull {OLLAMA_MODEL}[/bold] "
                 f"(ou [bold]ollama pull {OLLAMA_MODEL}[/bold])"
             )
-        return disponivel
+            return False
+
+        console.print(
+            f"[bold green]✓ Ollama OK[/bold green] — modelo "
+            f"[cyan]{OLLAMA_MODEL}[/cyan] disponível."
+        )
+        return True
     except requests.exceptions.ConnectionError:
         console.print(
             "[bold red]✗ Ollama não está rodando.[/bold red]\n"

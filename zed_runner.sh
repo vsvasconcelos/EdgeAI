@@ -42,7 +42,7 @@ case "$1" in
     ;;
 
   pull)
-    "$SCRIPT_DIR/ollama.sh" pull qwen2.5-coder:3b
+    "$SCRIPT_DIR/ollama.sh" pull qwen2.5-coder:7b
     ;;
 
   batch)
