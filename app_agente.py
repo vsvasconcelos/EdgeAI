@@ -483,6 +483,7 @@ def executar_pipeline_wokwi(llm: ChatOllama, pedido_usuario: str) -> tuple[str, 
             f"- Instancie TODOS os periféricos no ESCOPO GLOBAL logo após os imports: `dht_sensor = dht.DHT22(Pin(15))`, `i2c = I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)`, `display = SSD1306_I2C(128, 64, i2c)`, e três pinos separados para o LED RGB: `led_r = Pin(16, Pin.OUT)`, `led_g = Pin(17, Pin.OUT)`, `led_b = Pin(18, Pin.OUT)`. NUNCA passe tupla para Pin().\n"
             f"- NUNCA reimplemente a classe SSD1306_I2C no main.py (use apenas `from ssd1306 import SSD1306_I2C`).\n"
             f"- Inicialize SEMPRE variáveis de leitura ANTES do while True: `temp = None`, `hum = None`, `cor_atual = 'OFF'`, e timers com offset: `last_dht = time.ticks_ms() - 2000`, `last_oled = time.ticks_ms() - 1000` (evita UnboundLocalError na primeira iteração).\n"
+            f"- Se criar funções auxiliares que atualizam contadores ou telemetria (ex.: `atualizar_sensor_dht22()`), declare `global last_dht, last_oled, temp, hum` dentro da função se ela reatribuir essas variáveis (ou faça a verificação de `time.ticks_diff()` diretamente dentro do loop `while True:`).\n"
             f"- Implemente SOMENTE os componentes e pinos do pedido (NÃO adicione servo, LDR, potenciômetro ou botão se não foram pedidos).\n"
             f"- Respeite EXATAMENTE os textos de display (`MBA-FIAP`, `Temp: XX.X C`, `Umid: XX.X %`, `ERRO SENSOR`), todas as 4 faixas de temperatura/umidade e cores do LED RGB (`RED`, `BLUE`, `GREEN`, `YELLOW`, e `MAGENTA` em erro) e o formato JSON serial (`{{\"temp\": ..., \"hum\": ..., \"led_color\": ...}}`) do PEDIDO ORIGINAL.\n"
             f"- Use escalonamento não-bloqueante real com `time.ticks_ms()`, `time.ticks_diff()` e `time.sleep_ms(50)`.\n"
@@ -719,6 +720,60 @@ def _inferir_barramento_i2c_rp2040(match_i2c: re.Match) -> str:
     return f"{prefixo}{bus_id}, {args}"
 
 
+def injetar_declaracoes_global(codigo: str) -> str:
+    """
+    Analisa a AST de funções e injeta declarações 'global <var>' caso uma função
+    atribua valor a uma variável definida no escopo de módulo (como last_dht, last_oled, temp, hum).
+    Isso previne UnboundLocalError quando funções auxiliares atualizam contadores ou telemetria.
+    """
+    try:
+        tree = ast.parse(codigo)
+    except Exception:
+        return codigo
+
+    vars_modulo = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name):
+                    vars_modulo.add(t.id)
+
+    modificacoes = []
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef):
+            globais_declaradas = set()
+            vars_atribuidas = set()
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Global):
+                    globais_declaradas.update(sub.names)
+                elif isinstance(sub, ast.Assign):
+                    for t in sub.targets:
+                        if isinstance(t, ast.Name):
+                            vars_atribuidas.add(t.id)
+                elif isinstance(sub, ast.AugAssign) and isinstance(sub.target, ast.Name):
+                    vars_atribuidas.add(sub.target.id)
+
+            precisa_global = (vars_atribuidas & vars_modulo) - globais_declaradas
+            if precisa_global:
+                modificacoes.append((node.body[0].lineno, precisa_global))
+
+    if not modificacoes:
+        return codigo
+
+    linhas = codigo.splitlines()
+    for lineno, nomes in sorted(modificacoes, key=lambda x: x[0], reverse=True):
+        idx = lineno - 1
+        indent = "    "
+        if idx < len(linhas):
+            m = re.match(r"^([ \t]+)", linhas[idx])
+            if m:
+                indent = m.group(1)
+        stmt = f"{indent}global {', '.join(sorted(nomes))}"
+        linhas.insert(idx, stmt)
+
+    return "\n".join(linhas)
+
+
 def sanitizar_codigo_micropython(codigo: str) -> str:
     """
     Normaliza e corrige deslizes de geração de LLMs para MicroPython no Wokwi:
@@ -727,9 +782,13 @@ def sanitizar_codigo_micropython(codigo: str) -> str:
     - Corrige DHT22(...) / DHT11(...) desqualificados para dht.DHT22(...) / dht.DHT11(...).
     - Infere automaticamente o ID do barramento I2C (0 ou 1) no RP2040 quando omitido.
     - Analisa a AST do código e injeta automaticamente qualquer import nativo ausente.
+    - Injeta declarações 'global' em funções que reatribuem variáveis de estado/temporização.
     """
     # Remove parâmetro inválido font=... em text() do framebuf/ssd1306
     codigo = re.sub(r",\s*font\s*=\s*[\w.]+", "", codigo)
+
+    # Injeta 'global <var>' em funções que alteram variáveis de módulo (evita UnboundLocalError)
+    codigo = injetar_declaracoes_global(codigo)
 
     # Remove imports proibidos do CircuitPython alucinados por SLMs
     codigo = re.sub(r"^[ \t]*(?:import\s+board|from\s+board\s+import\s+.*)\n?", "", codigo, flags=re.MULTILINE)
@@ -1399,7 +1458,7 @@ def executar_loop_qa_e_correcao(
                     f"=== CÓDIGO COM DEFEITO ===\n```{bloco_md}\n{res_qa['codigo_limpo']}\n```\n\n"
                     f"=== REQUISITOS ORIGINAIS ===\n{pedido_usuario}\n\n"
                     f"INSTRUÇÕES DE CORREÇÃO OBRIGATÓRIAS:\n"
-                    f"1. Se o erro for `UnboundLocalError` (ex: 'temp' ou 'hum'): inicialize `temp = None` e `hum = None` ANTES do loop `while True:`, e defina `last_dht = time.ticks_ms() - 2000`.\n"
+                    f"1. Se o erro for `UnboundLocalError` em contadores ou telemetria (ex: 'last_dht', 'last_oled', 'temp' ou 'hum'): declare `global last_dht`, `global last_oled`, `global temp, hum` no início da função que faz a reatribuição, OU faça o `if time.ticks_diff(...)` diretamente no loop `while True:`.\n"
                     f"2. Declare TODOS os objetos de hardware (`dht_sensor`, `i2c`, `display`, `led_r`, `led_g`, `led_b`) no ESCOPO GLOBAL fora de funções.\n"
                     f"3. NUNCA passe tuplas para Pin (ex: `Pin((16,17,18))` é proibido); declare 3 pinos separados: `led_r = Pin(16, Pin.OUT)`, `led_g = Pin(17, Pin.OUT)`, `led_b = Pin(18, Pin.OUT)`.\n"
                     f"4. NUNCA reimplemente a classe `SSD1306_I2C`; use `from ssd1306 import SSD1306_I2C`.\n"
