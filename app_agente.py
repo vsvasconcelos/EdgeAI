@@ -376,9 +376,12 @@ def executar_pipeline_wokwi(llm: ChatOllama, pedido_usuario: str) -> tuple[str, 
         diretriz_sdk = (
             f"Linguagem: MicroPython nativo para {board_nome}. "
             "SEMPRE inclua no topo todos os imports usados: `import machine`, `from machine import Pin, I2C`, `import time`, `import json`. "
-            "Se houver DHT22/DHT11: faça `import dht` e instancie OBRIGATORIAMENTE com prefixo do módulo `dht.DHT22(Pin(15))` (NUNCA use `DHT22(...)` sem `dht.`), lendo com `.measure()`, `.temperature()` e `.humidity()`. "
-            "Se houver OLED SSD1306: use `from ssd1306 import SSD1306_I2C` e inicialize o I2C informando o ID do barramento 0: `I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)`. "
-            "Use temporização não-bloqueante com `time.ticks_ms()`, `time.ticks_diff()` e `time.sleep_ms(50)` no fim do loop. "
+            "Se houver DHT22/DHT11: faça `import dht` e instancie OBRIGATORIAMENTE no escopo global com prefixo do módulo `dht.DHT22(Pin(15))` (NUNCA use `DHT22(...)` sem `dht.`), lendo com `.measure()`, `.temperature()` e `.humidity()`. "
+            "Se houver OLED SSD1306: use `from ssd1306 import SSD1306_I2C` (NUNCA recrie a classe SSD1306_I2C) e inicialize o I2C informando o ID do barramento 0: `I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)`. "
+            "Instancie TODOS os periféricos (Pin, I2C, DHT, OLED, LED RGB) no escopo global (fora de qualquer função). "
+            "Para LED RGB: use 3 pinos separados (`led_r = Pin(16, Pin.OUT)`, `led_g = Pin(17, Pin.OUT)`, `led_b = Pin(18, Pin.OUT)`). NUNCA passe tupla para Pin(). "
+            "SEMPRE inicialize todas as variáveis de telemetria (ex: `temp = None`, `hum = None`, `cor_atual = 'OFF'`) ANTES do loop while True para evitar UnboundLocalError. "
+            "Use contadores não-bloqueantes com offset (`last_dht = time.ticks_ms() - 2000`, `last_oled = time.ticks_ms() - 1000`) com `time.ticks_diff()` e `time.sleep_ms(50)` no fim do loop. "
             "PROIBIDO importar `Adafruit_*`, `board`, `digitalio` ou `wokwi_gpio`."
         )
     elif "Arduino" in linguagem:
@@ -466,10 +469,12 @@ def executar_pipeline_wokwi(llm: ChatOllama, pedido_usuario: str) -> tuple[str, 
             f"=== ARQUITETURA ===\n{arquitetura}\n\n"
             f"REGRAS OBRIGATÓRIAS:\n"
             f"- Inclua todos os imports no topo (`import machine`, `from machine import Pin, I2C`, `import dht`, `import time`, `import json`, `from ssd1306 import SSD1306_I2C`).\n"
-            f"- Instancie o DHT22 como `dht.DHT22(Pin(15))` e o I2C0 como `I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)`.\n"
+            f"- Instancie TODOS os periféricos no ESCOPO GLOBAL logo após os imports: `dht_sensor = dht.DHT22(Pin(15))`, `i2c = I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)`, `display = SSD1306_I2C(128, 64, i2c)`, e três pinos separados para o LED RGB: `led_r = Pin(16, Pin.OUT)`, `led_g = Pin(17, Pin.OUT)`, `led_b = Pin(18, Pin.OUT)`. NUNCA passe tupla para Pin().\n"
+            f"- NUNCA reimplemente a classe SSD1306_I2C no main.py (use apenas `from ssd1306 import SSD1306_I2C`).\n"
+            f"- Inicialize SEMPRE variáveis de leitura ANTES do while True: `temp = None`, `hum = None`, `cor_atual = 'OFF'`, e timers com offset: `last_dht = time.ticks_ms() - 2000`, `last_oled = time.ticks_ms() - 1000` (evita UnboundLocalError na primeira iteração).\n"
             f"- Implemente SOMENTE os componentes e pinos do pedido (NÃO adicione servo, LDR, potenciômetro ou botão se não foram pedidos).\n"
             f"- Respeite EXATAMENTE os textos de display (`MBA-FIAP`, `Temp: XX.X C`, `Umid: XX.X %`, `ERRO SENSOR`), todas as 4 faixas de temperatura/umidade e cores do LED RGB (`RED`, `BLUE`, `GREEN`, `YELLOW`, e `MAGENTA` em erro) e o formato JSON serial (`{{\"temp\": ..., \"hum\": ..., \"led_color\": ...}}`) do PEDIDO ORIGINAL.\n"
-            f"- Use escalonamento não-bloqueante real com dois contadores (`last_dht` para 2000 ms e `last_oled` para 1000 ms) usando `time.ticks_ms()` e `time.ticks_diff()`.\n"
+            f"- Use escalonamento não-bloqueante real com `time.ticks_ms()`, `time.ticks_diff()` e `time.sleep_ms(50)`.\n"
             f"- Entregue primeiro o bloco ```{bloco_md} ... ``` com o código completo de `{arq_codigo}`.\n"
             f"- Depois entregue o bloco ```json ... ``` com o `diagram.json` no formato oficial Wokwi (`\"version\": 1, \"author\": \"EdgeAI\", \"editor\": \"wokwi\", \"parts\": [...], \"connections\": [...]`)."
         ),
@@ -715,6 +720,39 @@ def sanitizar_codigo_micropython(codigo: str) -> str:
     # Remove parâmetro inválido font=... em text() do framebuf/ssd1306
     codigo = re.sub(r",\s*font\s*=\s*[\w.]+", "", codigo)
 
+    # Remove reimplementação dummy de SSD1306_I2C se o modelo inventou uma classe incompleta
+    if re.search(r"class\s+SSD1306_I2C\b", codigo) and "framebuf.FrameBuffer" not in codigo:
+        codigo = re.sub(
+            r"class\s+SSD1306_I2C.*?(?=\ndef\s+|\n[a-zA-Z_]\w*\s*=|\Z)",
+            "from ssd1306 import SSD1306_I2C\n",
+            codigo,
+            flags=re.DOTALL,
+        )
+
+    # Corrige tentativa de passar tupla para Pin()
+    codigo = re.sub(
+        r"Pin\s*\(\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*,\s*Pin\.OUT\s*\)",
+        r"Pin(\1, Pin.OUT)",
+        codigo,
+    )
+
+    # Garante inicialização de temp e hum antes do while True para evitar UnboundLocalError
+    m_while = re.search(r"^([ \t]*)while\s+True\s*:", codigo, re.MULTILINE)
+    if m_while:
+        ind = m_while.group(1)
+        trecho_loop = codigo[m_while.start():]
+        trecho_antes = codigo[:m_while.start()]
+        if "temp" in trecho_loop and not re.search(rf"^{ind}temp\s*=", trecho_antes, re.MULTILINE):
+            codigo = (
+                codigo[:m_while.start()]
+                + f"{ind}temp = None\n{ind}hum = None\n"
+                + codigo[m_while.start():]
+            )
+
+    # Garante que timers não comecem com atraso desnecessário
+    codigo = re.sub(r"last_dht\s*=\s*time\.ticks_ms\(\)(?!\s*-\s*\d+)", "last_dht = time.ticks_ms() - 2000", codigo)
+    codigo = re.sub(r"last_oled\s*=\s*time\.ticks_ms\(\)(?!\s*-\s*\d+)", "last_oled = time.ticks_ms() - 1000", codigo)
+
     codigo = re.sub(r"(\bdht\w*\.temperature)(?!\s*\()", r"\1()", codigo)
     codigo = re.sub(r"(\bdht\w*\.humidity)(?!\s*\()", r"\1()", codigo)
 
@@ -749,8 +787,12 @@ def sanitizar_codigo_micropython(codigo: str) -> str:
     if imports_para_injetar:
         codigo = "\n".join(imports_para_injetar) + "\n" + codigo
 
-    if "dht_sensor" in codigo and not re.search(r"^\s*dht_sensor\s*=", codigo, re.MULTILINE):
-        codigo = codigo.replace("import dht", "import dht\ndht_sensor = dht.DHT22(Pin(15))", 1)
+    if "dht_sensor" in codigo and not re.search(r"^dht_sensor\s*=", codigo, re.MULTILINE):
+        if not re.search(r"\bimport\s+dht\b", codigo):
+            codigo = "import dht\n" + codigo
+        imps = [m.end() for m in re.finditer(r"^(?:import|from)\s+.*$", codigo, re.MULTILINE)]
+        pos = imps[-1] if imps else 0
+        codigo = codigo[:pos] + "\n\ndht_sensor = dht.DHT22(Pin(15))\n" + codigo[pos:]
     if "tela_atual" in codigo and not re.search(r"^\s*tela_atual\s*=", codigo, re.MULTILINE):
         codigo = "tela_atual = 0\n" + codigo
     return codigo
@@ -792,6 +834,11 @@ def executar_sandbox_micropython(codigo_limpo: str, board_id: str = "pico") -> d
         IRQ_RISING, IRQ_FALLING = 1, 2
 
         def __init__(self, pin_id, mode=-1, pull=-1, value=0):
+            if isinstance(pin_id, (tuple, list)):
+                raise TypeError(
+                    f"Pin() não aceita tupla/lista {pin_id}. "
+                    "Instancie cada pino separadamente (ex.: led_r = Pin(16, Pin.OUT), led_g = Pin(17, Pin.OUT), led_b = Pin(18, Pin.OUT))."
+                )
             if isinstance(pin_id, int):
                 pinos_usados.add(f"GP{pin_id}" if board_id == "pico" else str(pin_id))
             elif isinstance(pin_id, str):
@@ -1326,10 +1373,12 @@ def executar_loop_qa_e_correcao(
                     f"=== CÓDIGO COM DEFEITO ===\n```{bloco_md}\n{res_qa['codigo_limpo']}\n```\n\n"
                     f"=== REQUISITOS ORIGINAIS ===\n{pedido_usuario}\n\n"
                     f"INSTRUÇÕES DE CORREÇÃO OBRIGATÓRIAS:\n"
-                    f"1. Inclua TODOS os imports no topo (`import machine`, `from machine import Pin, I2C`, `import dht`, `import time`, `import json`, `from ssd1306 import SSD1306_I2C`).\n"
-                    f"2. Se usar DHT22, instancie com `dht.DHT22(Pin(15))` e trate `except OSError:`.\n"
-                    f"3. Se usar I2C no Raspberry Pi Pico, passe o ID do barramento 0: `I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)`.\n"
-                    f"4. Devolva o código COMPLETO corrigido dentro de ```{bloco_md} ... ```."
+                    f"1. Se o erro for `UnboundLocalError` (ex: 'temp' ou 'hum'): inicialize `temp = None` e `hum = None` ANTES do loop `while True:`, e defina `last_dht = time.ticks_ms() - 2000`.\n"
+                    f"2. Declare TODOS os objetos de hardware (`dht_sensor`, `i2c`, `display`, `led_r`, `led_g`, `led_b`) no ESCOPO GLOBAL fora de funções.\n"
+                    f"3. NUNCA passe tuplas para Pin (ex: `Pin((16,17,18))` é proibido); declare 3 pinos separados: `led_r = Pin(16, Pin.OUT)`, `led_g = Pin(17, Pin.OUT)`, `led_b = Pin(18, Pin.OUT)`.\n"
+                    f"4. NUNCA reimplemente a classe `SSD1306_I2C`; use `from ssd1306 import SSD1306_I2C`.\n"
+                    f"5. Se usar I2C no Raspberry Pi Pico, passe o ID do barramento 0: `I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)`.\n"
+                    f"6. Devolva o código COMPLETO corrigido dentro de ```{bloco_md} ... ```."
                 ),
             )
 

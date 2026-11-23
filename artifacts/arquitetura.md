@@ -1,83 +1,63 @@
 1. Imports obrigatórios:
-   ```python
-   import machine
-   from machine import Pin, I2C
-   import time
-   import json
-   from dht import DHT22
-   from ssd1306 import SSD1306_I2C
-   ```
+```python
+import machine
+from machine import Pin, I2C
+import time
+import json
+
+# Importar DHT22 se necessário
+# from dht import DHT22
+```
 
 2. Assinaturas das funções:
-   ```python
-   def display_header():
-       pass
+```python
+def read_dht():
+    # Função para ler o sensor DHT22 e retornar temperatura e umidade
+    pass
 
-   def update_display(temp, hum):
-       pass
+def update_display(temp, hum):
+    # Função para atualizar o display OLED com a temperatura e umidade
+    pass
 
-   def set_led_color(color):
-       pass
+def set_led_color(temp, hum):
+    # Função para definir a cor do LED RGB com base na temperatura e umidade
+    pass
 
-   def main():
-       while True:
-           try:
-               dht_sensor.measure()
-               temp = dht_sensor.temperature()
-               hum = dht_sensor.humidity()
+def main():
+    dht_sensor = dht.DHT22(Pin(15))
+    i2c_display = I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)
+    led_rgb = Pin((16, 17, 18), Pin.OUT)
 
-               # Atualiza o display
-               update_display(temp, hum)
+    while True:
+        temp, hum = read_dht()
+        
+        if temp is not None and hum is not None:
+            update_display(temp, hum)
+            set_led_color(temp, hum)
+        else:
+            print("ERRO SENSOR")
+            led_rgb.value(7)  # Magenta (R=1, G=0, B=1)
 
-               # Define a cor do LED RGB com base nas condições de temperatura e umidade
-               color = 0
-               if temp > 30.0:
-                   color |= 0b001  # Vermelho
-               elif temp < 18.0:
-                   color |= 0b010  # Verde
-               elif hum > 60.0:
-                   color |= 0b100  # Azul
+        json_state = {"temp": temp, "hum": hum}
+        print(json.dumps(json_state))
 
-               set_led_color(color)
-
-           except OSError as e:
-               display.fill(0)  # Limpa o display
-               display.text("ERRO SENSOR", 24, 0, font=font_6x8)
-               led_r.value(1)
-               led_g.value(1)
-               led_b.value(1)
-
-           time.sleep_ms(50)
-   ```
+        time.sleep_ms(2000)
+```
 
 3. Estrutura de estado do loop principal:
-   ```python
-   while True:
-       try:
-           dht_sensor.measure()
-           temp = dht_sensor.temperature()
-           hum = dht_sensor.humidity()
+```python
+while True:
+    temp, hum = read_dht()
+    
+    if temp is not None and hum is not None:
+        update_display(temp, hum)
+        set_led_color(temp, hum)
+    else:
+        print("ERRO SENSOR")
+        led_rgb.value(7)  # Magenta (R=1, G=0, B=1)
 
-           # Atualiza o display
-           update_display(temp, hum)
+    json_state = {"temp": temp, "hum": hum}
+    print(json.dumps(json_state))
 
-           # Define a cor do LED RGB com base nas condições de temperatura e umidade
-           color = 0
-           if temp > 30.0:
-               color |= 0b001  # Vermelho
-           elif temp < 18.0:
-               color |= 0b010  # Verde
-           elif hum > 60.0:
-               color |= 0b100  # Azul
-
-           set_led_color(color)
-
-       except OSError as e:
-           display.fill(0)  # Limpa o display
-           display.text("ERRO SENSOR", 24, 0, font=font_6x8)
-           led_r.value(1)
-           led_g.value(1)
-           led_b.value(1)
-
-       time.sleep_ms(50)
-   ```
+    time.sleep_ms(2000)
+```

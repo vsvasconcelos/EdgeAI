@@ -74,11 +74,9 @@ def renderizar_display(temp: float = None, hum: float = None, erro: bool = False
 # Loop Principal Não-Bloqueante
 # ==============================================================================
 def main():
-    # Inicializa tela e LED
     renderizar_display(None, None, erro=False)
     set_led_color(0, 0, 0)
 
-    # Temporizadores não-bloqueantes
     intervalo_dht_ms = 2000
     intervalo_oled_ms = 1000
 
@@ -103,7 +101,6 @@ def main():
                 falha_sensor = False
                 cor_atual, r, g, b = avaliar_clima(temp_atual, hum_atual)
                 set_led_color(r, g, b)
-                # Telemetria JSON compacta
                 telemetria = {"temp": temp_atual, "hum": hum_atual, "led_color": cor_atual}
                 print(json.dumps(telemetria))
             except OSError:
