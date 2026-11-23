@@ -1,0 +1,153 @@
+{
+  "version": 1,
+  "author": "EdgeAI",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "wokwi-pi-pico",
+      "id": "pico",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-dht22",
+      "id": "dht1",
+      "top": -130,
+      "left": -140,
+      "attrs": {}
+    },
+    {
+      "type": "board-ssd1306",
+      "id": "oled1",
+      "top": 120,
+      "left": -160,
+      "attrs": {
+        "i2cAddress": "0x3c"
+      }
+    },
+    {
+      "type": "wokwi-rgb-led",
+      "id": "rgb1",
+      "top": 40,
+      "left": 150,
+      "attrs": {
+        "common": "cathode"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r_red",
+      "top": 110,
+      "left": 110,
+      "attrs": {
+        "value": "220"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r_green",
+      "top": 110,
+      "left": 150,
+      "attrs": {
+        "value": "220"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r_blue",
+      "top": 110,
+      "left": 190,
+      "attrs": {
+        "value": "220"
+      }
+    }
+  ],
+  "connections": [
+    [
+      "dht1:VCC",
+      "pico:3V3",
+      "red",
+      []
+    ],
+    [
+      "dht1:GND",
+      "pico:GND.1",
+      "black",
+      []
+    ],
+    [
+      "dht1:SDA",
+      "pico:GP15",
+      "green",
+      []
+    ],
+    [
+      "oled1:VCC",
+      "pico:3V3",
+      "red",
+      []
+    ],
+    [
+      "oled1:GND",
+      "pico:GND.2",
+      "black",
+      []
+    ],
+    [
+      "oled1:SDA",
+      "pico:GP4",
+      "blue",
+      []
+    ],
+    [
+      "oled1:SCL",
+      "pico:GP5",
+      "cyan",
+      []
+    ],
+    [
+      "rgb1:COM",
+      "pico:GND.3",
+      "black",
+      []
+    ],
+    [
+      "pico:GP16",
+      "r_red:1",
+      "red",
+      []
+    ],
+    [
+      "r_red:2",
+      "rgb1:R",
+      "red",
+      []
+    ],
+    [
+      "pico:GP17",
+      "r_green:1",
+      "green",
+      []
+    ],
+    [
+      "r_green:2",
+      "rgb1:G",
+      "green",
+      []
+    ],
+    [
+      "pico:GP18",
+      "r_blue:1",
+      "blue",
+      []
+    ],
+    [
+      "r_blue:2",
+      "rgb1:B",
+      "blue",
+      []
+    ]
+  ],
+  "dependencies": {}
+}

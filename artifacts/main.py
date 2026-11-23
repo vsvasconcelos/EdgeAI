@@ -1,8 +1,9 @@
 import machine
 from machine import Pin, I2C
-import dht
 import time
 import json
+import dht
+
 try:
     from ssd1306 import SSD1306_I2C
 except ImportError:
@@ -19,83 +20,82 @@ except ImportError:
         def show(self):
             for cmd in (0x21, 0, self.width - 1, 0x22, 0, (self.height // 8) - 1):
                 self.i2c.writeto(self.addr, bytearray([0x80, cmd]))
-            self.i2c.writevto(self.addr, [b"\x40", self.buffer])
-# Inicializações globais
+            self.i2c.writevto(self.addr, [b"@", self.buffer])
+
+# Instanciação dos periféricos nos pinos oficiais
 dht_sensor = dht.DHT22(Pin(15))
 i2c = I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)
 oled = SSD1306_I2C(128, 64, i2c)
+display = oled
+
+# Instanciação dos Pinos do LED RGB (Cátodo comum: 1 = ligado, 0 = desligado)
 led_r = Pin(16, Pin.OUT)
 led_g = Pin(17, Pin.OUT)
 led_b = Pin(18, Pin.OUT)
-# Variáveis de telemetria
+
+# Variáveis globais de telemetria
 temp = None
 hum = None
 cor_atual = 'OFF'
-# Contadores não-bloqueantes
+
+# Timers não-bloqueantes com offset para rodar no primeiro ciclo
 last_dht = time.ticks_ms() - 2000
 last_oled = time.ticks_ms() - 1000
-def atualizar_led(cor):
+
+def atualizar_led_rgb():
     global cor_atual
-    if cor != cor_atual:
-        led_r.value(0)
-        led_g.value(0)
-        led_b.value(0)
-        if cor == 'RED':
-            led_r.value(1)
-        elif cor == 'GREEN':
-            led_g.value(1)
-        elif cor == 'BLUE':
-            led_b.value(1)
-        elif cor == 'MAGENTA':
-            led_r.value(1)
-            led_b.value(1)
-        cor_atual = cor
-def ler_sensor_dht22():
-    global temp, hum
-    try:
-        dht_sensor.measure()
-        temp = dht_sensor.temperature()
-        hum = dht_sensor.humidity()
-    except OSError:
-        print("ERRO SENSOR")
-        atualizar_led('MAGENTA')
-        temp = None
-        hum = None
-def atualizar_display():
-    oled.fill(0)
-    oled.text("MBA-FIAP", 0, 0)
-    oled.line(0, 12, 127, 12)
-    if temp is not None and hum is not None:
-        oled.text(f"Temp: {temp:.1f} C", 0, 24)
-        oled.text(f"Umid: {hum:.1f} %", 0, 42)
-    else:
-        oled.text("ERRO SENSOR", 0, 24)
-        oled.text("ERRO SENSOR", 0, 42)
-    oled.show()
-def determinar_cor(temp, hum):
-    if temp > 30.0 or hum < 30.0:
-        return 'RED'
+    if temp is None or hum is None:
+        led_r.value(1); led_g.value(0); led_b.value(1)
+        cor_atual = 'MAGENTA'
+    elif temp > 30.0 or hum < 30.0:
+        led_r.value(1); led_g.value(0); led_b.value(0)
+        cor_atual = 'RED'
     elif temp < 18.0 or hum > 75.0:
-        return 'BLUE'
+        led_r.value(0); led_g.value(0); led_b.value(1)
+        cor_atual = 'BLUE'
     elif 18.0 <= temp <= 26.0 and 40.0 <= hum <= 70.0:
-        return 'GREEN'
+        led_r.value(0); led_g.value(1); led_b.value(0)
+        cor_atual = 'GREEN'
     else:
-        return 'YELLOW'
-def telemetria_console():
-    if temp is not None and hum is not None:
-        print(json.dumps({"temp": temp, "hum": hum, "led_color": determinar_cor(temp, hum)}))
-# Função principal
+        led_r.value(1); led_g.value(1); led_b.value(0)
+        cor_atual = 'YELLOW'
+
+def enviar_telemetria_serial():
+    global temp, hum, cor_atual
+    telemetria = {"temp": temp, "hum": hum, "led_color": cor_atual}
+    print(json.dumps(telemetria))
+
+def atualizar_sensor_dht22():
+    global temp, hum, last_dht
+    agora = time.ticks_ms()
+    if time.ticks_diff(agora, last_dht) >= 2000:
+        last_dht = agora
+        try:
+            dht_sensor.measure()
+            temp = dht_sensor.temperature()
+            hum = dht_sensor.humidity()
+        except OSError:
+            temp = None
+            hum = None
+        atualizar_led_rgb()
+        enviar_telemetria_serial()
+
+def atualizar_display_oled():
+    global last_oled
+    agora = time.ticks_ms()
+    if time.ticks_diff(agora, last_oled) >= 1000:
+        last_oled = agora
+        oled.fill(0)
+        oled.text("MBA-FIAP", 32, 0)
+        oled.hline(0, 12, 128, 1)
+        if temp is not None and hum is not None:
+            oled.text("Temp: {:.1f} C".format(temp), 16, 24)
+            oled.text("Umid: {:.1f} % ".format(hum), 16, 42)
+        else:
+            oled.text("ERRO SENSOR", 20, 32)
+        oled.show()
+
 while True:
-    current_time = time.ticks_ms()
-    # Atualiza sensor DHT22 a cada 2000 ms
-    if time.ticks_diff(current_time, last_dht) >= 2000:
-        ler_sensor_dht22()
-        last_dht = current_time
-    # Atualiza display OLED a cada 1000 ms
-    if time.ticks_diff(current_time, last_oled) >= 1000:
-        atualizar_display()
-        last_oled = current_time
-    # Imprime telemetria no console serial a cada 2000 ms
-    telemetria_console()
-    # Espera 50 ms antes da próxima iteração
+    atualizar_sensor_dht22()
+    atualizar_display_oled()
     time.sleep_ms(50)

@@ -910,9 +910,13 @@ def sanitizar_codigo_micropython(codigo: str) -> str:
                 + codigo[m_while.start():]
             )
 
-    # Garante que timers não comecem com atraso desnecessário
-    codigo = re.sub(r"last_dht\s*=\s*time\.ticks_ms\(\)(?!\s*-\s*\d+)", "last_dht = time.ticks_ms() - 2000", codigo)
-    codigo = re.sub(r"last_oled\s*=\s*time\.ticks_ms\(\)(?!\s*-\s*\d+)", "last_oled = time.ticks_ms() - 1000", codigo)
+    # Garante que timers no escopo global (inicialização antes do while True) iniciem prontos para o primeiro ciclo
+    codigo = re.sub(r"^(last_dht\s*=\s*time\.ticks_ms\(\))(?!\s*-\s*\d+)", r"\1 - 2000", codigo, flags=re.MULTILINE)
+    codigo = re.sub(r"^(last_oled\s*=\s*time\.ticks_ms\(\))(?!\s*-\s*\d+)", r"\1 - 1000", codigo, flags=re.MULTILINE)
+
+    # Garante que atualizações de timer dentro de funções ou no loop (linhas indentadas) NÃO tenham offset regressivo
+    codigo = re.sub(r"([ \t]+last_dht\s*=\s*time\.ticks_ms\(\))\s*-\s*\d+", r"\1", codigo)
+    codigo = re.sub(r"([ \t]+last_oled\s*=\s*time\.ticks_ms\(\))\s*-\s*\d+", r"\1", codigo)
 
     codigo = re.sub(r"(\bdht\w*\.temperature)(?!\s*\()", r"\1()", codigo)
     codigo = re.sub(r"(\bdht\w*\.humidity)(?!\s*\()", r"\1()", codigo)
@@ -2020,6 +2024,12 @@ def salvar_artefatos(escopo: str, arquitetura: str, codigo: str, pedido_usuario:
         if gerar_firmware_uf2_wokwi(codigo_limpo, ssd_code, uf2_run):
             import shutil
             shutil.copyfile(uf2_run, uf2_latest)
+
+    # 3. Sincroniza diagram.json na raiz do projeto para o simulador da extensão Wokwi (VS Code / Antigravity)
+    if modo_wokwi and diagram_json_str:
+        pasta_raiz = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(pasta_raiz, "diagram.json"), "w", encoding="utf-8") as f:
+            f.write(diagram_json_str)
 
     console.print(f"[bold green]✓ Histórico gravado em:[/bold green] [cyan]{pasta_run}/[/cyan]")
     console.print(f"[bold green]✓ Versão mais recente atualizada em:[/bold green] [cyan]{pasta_base}/[/cyan]")
