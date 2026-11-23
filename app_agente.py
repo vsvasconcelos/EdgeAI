@@ -483,7 +483,8 @@ def executar_pipeline_wokwi(llm: ChatOllama, pedido_usuario: str) -> tuple[str, 
             f"- Instancie TODOS os periféricos no ESCOPO GLOBAL logo após os imports: `dht_sensor = dht.DHT22(Pin(15))`, `i2c = I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)`, `display = SSD1306_I2C(128, 64, i2c)`, e três pinos separados para o LED RGB: `led_r = Pin(16, Pin.OUT)`, `led_g = Pin(17, Pin.OUT)`, `led_b = Pin(18, Pin.OUT)`. NUNCA passe tupla para Pin().\n"
             f"- NUNCA reimplemente a classe SSD1306_I2C no main.py (use apenas `from ssd1306 import SSD1306_I2C`).\n"
             f"- Inicialize SEMPRE variáveis de leitura ANTES do while True: `temp = None`, `hum = None`, `cor_atual = 'OFF'`, e timers com offset: `last_dht = time.ticks_ms() - 2000`, `last_oled = time.ticks_ms() - 1000` (evita UnboundLocalError na primeira iteração).\n"
-            f"- Se criar funções auxiliares que atualizam contadores ou telemetria (ex.: `atualizar_sensor_dht22()`), declare `global last_dht, last_oled, temp, hum` dentro da função se ela reatribuir essas variáveis (ou faça a verificação de `time.ticks_diff()` diretamente dentro do loop `while True:`).\n"
+            f"- ESTRUTURA DO LOOP WHILE TRUE: Mantenha a leitura do DHT22, o cálculo de cores do LED RGB e o envio de telemetria serial `print(json.dumps(...))` JUNTOS dentro do mesmo bloco `if time.ticks_diff(agora, last_dht) >= 2000:` para garantir envio a cada 2s sem conflito de timers.\n"
+            f"- NUNCA declare `global temp` ou `global hum` se `temp` ou `hum` forem parâmetros de uma função (isso gera `SyntaxError: name is parameter and global`).\n"
             f"- Implemente SOMENTE os componentes e pinos do pedido (NÃO adicione servo, LDR, potenciômetro ou botão se não foram pedidos).\n"
             f"- Respeite EXATAMENTE os textos de display (`MBA-FIAP`, `Temp: XX.X C`, `Umid: XX.X %`, `ERRO SENSOR`), todas as 4 faixas de temperatura/umidade e cores do LED RGB (`RED`, `BLUE`, `GREEN`, `YELLOW`, e `MAGENTA` em erro) e o formato JSON serial (`{{\"temp\": ..., \"hum\": ..., \"led_color\": ...}}`) do PEDIDO ORIGINAL.\n"
             f"- Use escalonamento não-bloqueante real com `time.ticks_ms()`, `time.ticks_diff()` e `time.sleep_ms(50)`.\n"
@@ -650,6 +651,7 @@ def analisar_ast_codigo_python(codigo_limpo: str) -> dict:
     """Analisa estaticamente a AST do código Python/MicroPython (SyntaxError e nomes indefinidos)."""
     try:
         arvore = ast.parse(codigo_limpo)
+        compile(codigo_limpo, "<codigo>", "exec")
     except SyntaxError as e:
         return {
             "ok": False,
@@ -673,14 +675,14 @@ def analisar_ast_codigo_python(codigo_limpo: str) -> dict:
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             definidos.add(node.name)
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                for arg in node.args.args + node.args.posonlyargs + node.args.kwonlyargs:
+                for arg in node.args.args + getattr(node.args, "posonlyargs", []) + node.args.kwonlyargs:
                     definidos.add(arg.arg)
                 if node.args.vararg:
                     definidos.add(node.args.vararg.arg)
                 if node.args.kwarg:
                     definidos.add(node.args.kwarg.arg)
         elif isinstance(node, ast.Lambda):
-            for arg in node.args.args + node.args.posonlyargs + node.args.kwonlyargs:
+            for arg in node.args.args + getattr(node.args, "posonlyargs", []) + node.args.kwonlyargs:
                 definidos.add(arg.arg)
         elif isinstance(node, ast.ExceptHandler) and node.name:
             definidos.add(node.name)
@@ -720,11 +722,14 @@ def _inferir_barramento_i2c_rp2040(match_i2c: re.Match) -> str:
     return f"{prefixo}{bus_id}, {args}"
 
 
-def injetar_declaracoes_global(codigo: str) -> str:
+def tratar_declaracoes_global(codigo: str) -> str:
     """
-    Analisa a AST de funções e injeta declarações 'global <var>' caso uma função
-    atribua valor a uma variável definida no escopo de módulo (como last_dht, last_oled, temp, hum).
-    Isso previne UnboundLocalError quando funções auxiliares atualizam contadores ou telemetria.
+    Higieniza e normaliza declarações 'global' em funções via análise de AST:
+    1. Remove variáveis declaradas como 'global' caso sejam parâmetros da própria função,
+       evitando SyntaxError: name '<var>' is parameter and global.
+    2. Injeta declarações 'global <var>' caso a função reatribua uma variável do módulo
+       (ex.: last_dht, last_oled, temp, hum) e essa variável não seja parâmetro da função,
+       evitando UnboundLocalError em tempo de execução.
     """
     try:
         tree = ast.parse(codigo)
@@ -738,9 +743,54 @@ def injetar_declaracoes_global(codigo: str) -> str:
                 if isinstance(t, ast.Name):
                     vars_modulo.add(t.id)
 
-    modificacoes = []
+    linhas = codigo.splitlines()
+
+    # Passo 1: Remover conflitos entre parâmetros da função e declarações 'global'
+    modificacoes_globais = []
     for node in tree.body:
-        if isinstance(node, ast.FunctionDef):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            params = {a.arg for a in (node.args.args + getattr(node.args, "posonlyargs", []) + node.args.kwonlyargs)}
+            if node.args.vararg:
+                params.add(node.args.vararg.arg)
+            if node.args.kwarg:
+                params.add(node.args.kwarg.arg)
+
+            for sub in node.body:
+                if isinstance(sub, ast.Global):
+                    conflitos = set(sub.names) & params
+                    if conflitos:
+                        nomes_validos = [n for n in sub.names if n not in params]
+                        modificacoes_globais.append((sub.lineno, nomes_validos))
+
+    for lineno, nomes_validos in sorted(modificacoes_globais, key=lambda x: x[0], reverse=True):
+        idx = lineno - 1
+        if not nomes_validos:
+            linhas[idx] = ""
+        else:
+            indent = "    "
+            m = re.match(r"^([ \t]+)", linhas[idx])
+            if m:
+                indent = m.group(1)
+            linhas[idx] = f"{indent}global {', '.join(sorted(nomes_validos))}"
+
+    linhas = [l for l in linhas if l.strip() != ""]
+    codigo_intermediario = "\n".join(linhas)
+
+    # Passo 2: Injetar 'global' quando a função reatribui variável do módulo que não é parâmetro
+    try:
+        tree2 = ast.parse(codigo_intermediario)
+    except Exception:
+        return codigo_intermediario
+
+    modificacoes_injecao = []
+    for node in tree2.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            params = {a.arg for a in (node.args.args + getattr(node.args, "posonlyargs", []) + node.args.kwonlyargs)}
+            if node.args.vararg:
+                params.add(node.args.vararg.arg)
+            if node.args.kwarg:
+                params.add(node.args.kwarg.arg)
+
             globais_declaradas = set()
             vars_atribuidas = set()
             for sub in ast.walk(node):
@@ -753,25 +803,22 @@ def injetar_declaracoes_global(codigo: str) -> str:
                 elif isinstance(sub, ast.AugAssign) and isinstance(sub.target, ast.Name):
                     vars_atribuidas.add(sub.target.id)
 
-            precisa_global = (vars_atribuidas & vars_modulo) - globais_declaradas
+            precisa_global = (vars_atribuidas & vars_modulo) - params - globais_declaradas
             if precisa_global:
-                modificacoes.append((node.body[0].lineno, precisa_global))
+                modificacoes_injecao.append((node.body[0].lineno, precisa_global))
 
-    if not modificacoes:
-        return codigo
-
-    linhas = codigo.splitlines()
-    for lineno, nomes in sorted(modificacoes, key=lambda x: x[0], reverse=True):
+    linhas2 = codigo_intermediario.splitlines()
+    for lineno, nomes in sorted(modificacoes_injecao, key=lambda x: x[0], reverse=True):
         idx = lineno - 1
         indent = "    "
-        if idx < len(linhas):
-            m = re.match(r"^([ \t]+)", linhas[idx])
+        if idx < len(linhas2):
+            m = re.match(r"^([ \t]+)", linhas2[idx])
             if m:
                 indent = m.group(1)
         stmt = f"{indent}global {', '.join(sorted(nomes))}"
-        linhas.insert(idx, stmt)
+        linhas2.insert(idx, stmt)
 
-    return "\n".join(linhas)
+    return "\n".join(linhas2)
 
 
 def sanitizar_codigo_micropython(codigo: str) -> str:
@@ -787,8 +834,19 @@ def sanitizar_codigo_micropython(codigo: str) -> str:
     # Remove parâmetro inválido font=... em text() do framebuf/ssd1306
     codigo = re.sub(r",\s*font\s*=\s*[\w.]+", "", codigo)
 
-    # Injeta 'global <var>' em funções que alteram variáveis de módulo (evita UnboundLocalError)
-    codigo = injetar_declaracoes_global(codigo)
+    # Normaliza e higieniza escopos/declarações 'global' (evita SyntaxError e UnboundLocalError)
+    codigo = tratar_declaracoes_global(codigo)
+
+    # Resolve alias cruzado entre 'display' e 'oled'
+    tem_display = bool(re.search(r"^[ \t]*display\s*=\s*(?:SSD1306|ssd1306)", codigo, re.MULTILINE))
+    tem_oled = bool(re.search(r"^[ \t]*oled\s*=\s*(?:SSD1306|ssd1306)", codigo, re.MULTILINE))
+    if tem_display and not tem_oled and re.search(r"\boled\.", codigo):
+        codigo = re.sub(r"(^[ \t]*display\s*=\s*[^\n]+)", r"\1\noled = display", codigo, count=1, flags=re.MULTILINE)
+    elif tem_oled and not tem_display and re.search(r"\bdisplay\.", codigo):
+        codigo = re.sub(r"(^[ \t]*oled\s*=\s*[^\n]+)", r"\1\ndisplay = oled", codigo, count=1, flags=re.MULTILINE)
+
+    # Corrige segundo ticks_diff redundante para telemetria serial caso last_dht tenha sido atualizado imediatamente antes
+    codigo = re.sub(r"if\s+time\.ticks_diff\([^)]+,\s*last_dht\)\s*>=\s*\d+\s+and\s+(.*?):", r"if \1:", codigo)
 
     # Remove imports proibidos do CircuitPython alucinados por SLMs
     codigo = re.sub(r"^[ \t]*(?:import\s+board|from\s+board\s+import\s+.*)\n?", "", codigo, flags=re.MULTILINE)
@@ -1458,12 +1516,14 @@ def executar_loop_qa_e_correcao(
                     f"=== CÓDIGO COM DEFEITO ===\n```{bloco_md}\n{res_qa['codigo_limpo']}\n```\n\n"
                     f"=== REQUISITOS ORIGINAIS ===\n{pedido_usuario}\n\n"
                     f"INSTRUÇÕES DE CORREÇÃO OBRIGATÓRIAS:\n"
-                    f"1. Se o erro for `UnboundLocalError` em contadores ou telemetria (ex: 'last_dht', 'last_oled', 'temp' ou 'hum'): declare `global last_dht`, `global last_oled`, `global temp, hum` no início da função que faz a reatribuição, OU faça o `if time.ticks_diff(...)` diretamente no loop `while True:`.\n"
-                    f"2. Declare TODOS os objetos de hardware (`dht_sensor`, `i2c`, `display`, `led_r`, `led_g`, `led_b`) no ESCOPO GLOBAL fora de funções.\n"
-                    f"3. NUNCA passe tuplas para Pin (ex: `Pin((16,17,18))` é proibido); declare 3 pinos separados: `led_r = Pin(16, Pin.OUT)`, `led_g = Pin(17, Pin.OUT)`, `led_b = Pin(18, Pin.OUT)`.\n"
-                    f"4. NUNCA reimplemente a classe `SSD1306_I2C`; use `from ssd1306 import SSD1306_I2C`.\n"
-                    f"5. Se usar I2C no Raspberry Pi Pico, passe o ID do barramento 0: `I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)`.\n"
-                    f"6. Devolva o código COMPLETO corrigido dentro de ```{bloco_md} ... ```."
+                    f"1. Se o erro for `SyntaxError: name '...' is parameter and global`: NUNCA declare `global` para nomes que já são parâmetros de uma função.\n"
+                    f"2. Se o erro for `UnboundLocalError` em contadores ou telemetria: declare `global` no topo da função apenas para variáveis de módulo que não sejam parâmetros, OU coloque a lógica diretamente dentro do loop `while True:`.\n"
+                    f"3. Mantenha a telemetria serial `print(json.dumps(...))` dentro do mesmo bloco `if time.ticks_diff(...) >= 2000:` da leitura do DHT22 para que seja enviada a cada 2s.\n"
+                    f"4. Declare TODOS os objetos de hardware (`dht_sensor`, `i2c`, `display`, `led_r`, `led_g`, `led_b`) no ESCOPO GLOBAL fora de funções.\n"
+                    f"5. NUNCA passe tuplas para Pin (ex: `Pin((16,17,18))` é proibido); declare 3 pinos separados: `led_r = Pin(16, Pin.OUT)`, `led_g = Pin(17, Pin.OUT)`, `led_b = Pin(18, Pin.OUT)`.\n"
+                    f"6. NUNCA reimplemente a classe `SSD1306_I2C`; use `from ssd1306 import SSD1306_I2C`.\n"
+                    f"7. Se usar I2C no Raspberry Pi Pico, passe o ID do barramento 0: `I2C(0, scl=Pin(5), sda=Pin(4), freq=400000)`.\n"
+                    f"8. Devolva o código COMPLETO corrigido dentro de ```{bloco_md} ... ```."
                 ),
             )
 
