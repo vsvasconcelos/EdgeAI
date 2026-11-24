@@ -1586,7 +1586,9 @@ def gerar_firmware_uf2_wokwi(codigo_main: str, codigo_ssd1306: str, destino_uf2:
     """
     import struct
     pasta_base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
-    caminho_base_uf2 = os.path.join(pasta_base, "firmware_base.uf2")
+    caminho_base_uf2 = os.path.join(pasta_base, "base", "firmware_base.uf2")
+    if not os.path.exists(caminho_base_uf2):
+        caminho_base_uf2 = os.path.join(pasta_base, "firmware_base.uf2")
     if not os.path.exists(caminho_base_uf2):
         return False
 
@@ -2011,15 +2013,16 @@ def salvar_artefatos(escopo: str, arquitetura: str, codigo: str, pedido_usuario:
         with open(os.path.join(pasta_run, nome_arq), "w", encoding="utf-8") as f:
             f.write(conteudo)
 
-    # 2. Salvar/Atualizar na raiz de artifacts/ como "latest" (Última versão)
-    os.makedirs(pasta_base, exist_ok=True)
+    # 2. Salvar/Atualizar na pasta artifacts/latest/ como "latest" (Última versão)
+    pasta_latest = os.path.join(pasta_base, "latest")
+    os.makedirs(pasta_latest, exist_ok=True)
     for nome_arq, conteudo in arquivos_gerados:
-        with open(os.path.join(pasta_base, nome_arq), "w", encoding="utf-8") as f:
+        with open(os.path.join(pasta_latest, nome_arq), "w", encoding="utf-8") as f:
             f.write(conteudo)
 
     if modo_wokwi and linguagem == "MicroPython" and board_id == "pico":
         uf2_run = os.path.join(pasta_run, "firmware.uf2")
-        uf2_latest = os.path.join(pasta_base, "firmware.uf2")
+        uf2_latest = os.path.join(pasta_latest, "firmware.uf2")
         ssd_code = DRIVER_SSD1306_MICROPYTHON if usa_ssd1306 else ""
         if gerar_firmware_uf2_wokwi(codigo_limpo, ssd_code, uf2_run):
             import shutil
@@ -2032,7 +2035,7 @@ def salvar_artefatos(escopo: str, arquitetura: str, codigo: str, pedido_usuario:
             f.write(diagram_str)
 
     console.print(f"[bold green]✓ Histórico gravado em:[/bold green] [cyan]{pasta_run}/[/cyan]")
-    console.print(f"[bold green]✓ Versão mais recente atualizada em:[/bold green] [cyan]{pasta_base}/[/cyan]")
+    console.print(f"[bold green]✓ Versão mais recente atualizada em:[/bold green] [cyan]{pasta_latest}/[/cyan]")
     if modo_wokwi:
         nomes_wokwi = ", ".join(n for n, _ in arquivos_gerados if n not in ("escopo.md", "arquitetura.md", "raciocinio.md"))
         console.print(

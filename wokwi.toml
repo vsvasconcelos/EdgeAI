@@ -1,5 +1,5 @@
 [wokwi]
 version = 1
-firmware = "artifacts/firmware.uf2"
-elf = "artifacts/firmware.uf2"
+firmware = "artifacts/latest/firmware.uf2"
+elf = "artifacts/latest/firmware.uf2"
 rfc2217ServerPort = 4000
