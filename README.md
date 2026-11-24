@@ -114,6 +114,22 @@ Apesar das mitigações determinísticas da Fase 3, testes empíricos sucessivos
 *   **Compatibilidade de Hardware (RTX 5070 8GB VRAM)**: O modelo de 7B cabe integralmente na VRAM dedicada da GPU (~5.2 GB com janela de contexto de 4096 tokens), executando 100% acelerado por hardware sem recorrer a offload na CPU e alcançando alta taxa de tokens por segundo (~45-60 t/s).
 *   **Sanitização Preventiva no Loop de QA**: O `app_agente.py` foi atualizado para sanitizar o código preventivamente a cada iteração do QA, garantindo redundância dupla (inteligência do modelo 7B + filtros determinísticos de segurança).
 
+### Fase 5: Por que manter o "Pipeline Direto (Sem ReAct)" no Modelo de 7B?
+Com o upgrade para o **`qwen2.5-coder:7b`**, consolidou-se uma decisão fundamental de design de software: *se o modelo 7B possui capacidade cognitiva comprovada para executar o protocolo ReAct (Reasoning + Acting) e Function Calling, por que o sistema mantém a menção e o modo "pipeline direto (sem ReAct)"?*
+
+A decisão baseia-se em engenharia de sistemas de missão crítica e eficiência computacional na borda:
+
+1. **A Capacidade Cognitiva do 7B vs. 1.5B/3B:**
+   - **Modelos ≤3B:** Falham estruturalmente no protocolo ReAct (`Thought → Action → Action Input → Observation → Final Answer`), gerando frequentes quebras de parser JSON, alucinações de ferramentas e loops intermináveis de raciocínio interno (travando por até 27 minutos).
+   - **Modelo 7B (`qwen2.5-coder:7b`):** Possui suporte nativo a *Function Calling* e raciocínio multi-etapa estruturado, sendo perfeitamente capaz de operar sob o paradigma ReAct tradicional caso ferramentas ativas de shell/API fossem acopladas ao seu loop.
+
+2. **As Vantagens do Pipeline Direto sobre o ReAct Dinâmico:**
+   - **Eficiência de Tempo e Orçamento de Tokens:** O loop ReAct exige entre 8 a 15 turnos sequenciais de inferência para "pensar", "agir", "observar" e "repensar", o que infla o cache de contexto (KV Cache) e multiplica o tempo total de resposta. No Pipeline Direto, cada agente especialista (GP, Arquiteto e Desenvolvedor) executa uma única passagem focada e completa, entregando os artefatos prontos em ~30 segundos na RTX 5070.
+   - **Avaliação no Mundo Real (*Deterministic Evaluation Harness*) vs. ReAct Autocentrado:** No ReAct puro, o agente julga a si mesmo por autorreflexão (suscetível a viés de confirmação e alucinação). No nosso Pipeline Direto, a avaliação é delegada a um **Sandbox de Execução Real em MicroPython** externo e agnóstico ao modelo, que compila a AST, simula o comportamento dos periféricos, injeta falhas físicas de sensor e valida a telemetria serial.
+   - **Loop de Correção Orientado a Evidências Físicas:** O modelo só reentra em iteração corretiva se o Sandbox real capturar uma falha objetiva de execução, enviando o Traceback real do MicroPython diretamente no prompt do Agente Corretor. Isso une alta velocidade em regime normal a auto-reparo guiado por dados quando necessário.
+
+Portanto, a indicação `Modo: pipeline direto (sem ReAct)` no banner de inicialização não reflete uma limitação técnica do modelo 7B, mas sim a escolha da arquitetura mais determinística, rápida e confiável para a geração de firmware embarcado.
+
 ---
 
 ## 💻 Hardware Alvo e Configuração

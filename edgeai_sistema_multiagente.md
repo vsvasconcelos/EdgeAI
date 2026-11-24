@@ -43,6 +43,15 @@ Testes empíricos demonstraram que modelos de 3B parâmetros sofrem de instabili
 
 A migração para o **`qwen2.5-coder:7b` (~4.7 GB)**, executando 100% acelerado na GPU **NVIDIA GeForce RTX 5070 (8 GB VRAM)** com 16 GB de RAM no host, elevou o índice de aprovação direta no primeiro ciclo de QA e erradicou as falhas sintáticas do modelo menor.
 
+**Racional Arquitetural do "Sem ReAct" no Modelo 7B (Fase 5):**
+Com a adoção do `qwen2.5-coder:7b`, cabe o registro histórico sobre a decisão de manter o sistema como **"pipeline direto (sem ReAct)"**:
+1. **O 7B suporta ReAct?** Sim. Diferente dos modelos de 1.5B e 3B, o Qwen2.5-Coder-7B possui suporte nativo maduro a *Function Calling* e raciocínio multi-passo estruturado, sendo plenamente capaz de executar loops de pensamento e ação (*Thought → Action → Observation*).
+2. **Por que manter o Pipeline Direto?**
+   - **Performance e Economia de Contexto:** Um loop ReAct genérico demanda de 8 a 15 turnos sequenciais para que o agente consulte ferramentas, inflando o buffer de tokens e elevando a latência de inferência local para 3 a 5 minutos. No Pipeline Direto, a geração ocorre em estágios consolidados e limpos (~30 segundos na RTX 5070).
+   - **Sandbox Externo Determinístico:** Em vez de confiar na autoavaliação subjetiva do modelo ("achar" que o código funciona), o sistema submete a entrega a um **Sandbox MicroPython real** (AST, imports, hardware virtualizado, simulação de falha com `OSError` e telemetria serial).
+   - **Correção Baseada em Evidências:** O loop de auto-reparo só entra em ação quando o Sandbox real detecta uma falha física objetiva, passando o Traceback real ao Agente Corretor.
+3. **Conclusão:** O indicativo "sem ReAct" não é um sinal de fraqueza do modelo de 7B, mas uma escolha arquitetural de engenharia para atingir máxima velocidade, determinismo e confiabilidade em sistemas embarcados.
+
 ---
 
 ## Hardware e Ambiente

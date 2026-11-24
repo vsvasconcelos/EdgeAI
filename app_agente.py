@@ -2,32 +2,33 @@
 # =============================================================================
 #  EdgeAI — Sistema Multi-Agente Local (Edge AI)
 #  Arquivo  : app_agente.py
-#  Modelo   : qwen2.5-coder:3b (INT4/GGUF) via Ollama
+#  Modelo   : qwen2.5-coder:7b (INT4/GGUF) via Ollama (fallback: 3b)
 #
-#  Hardware alvo:
-#    CPU: 8 núcleos | RAM: 8 GB | GPU: NVIDIA MX110 2GB VRAM | OS: Ubuntu
+#  Hardware de Referência:
+#    GPU: NVIDIA RTX 5070 8GB VRAM | CPU: 16 threads | RAM: 16 GB | OS: Ubuntu/WSL2
+#  Perfil Mínimo:
+#    GPU: NVIDIA MX110 2GB VRAM (fallback 3b) | CPU: 8 núcleos | RAM: 8 GB
 #
-#  ARQUITETURA DE IMPLEMENTAÇÃO:
+#  ARQUITETURA DE IMPLEMENTAÇÃO E RACIONAL "SEM REACT":
 #  ─────────────────────────────────────────────────────────────────────
-#  O CrewAI v0.11.2 usa o AgentExecutor do LangChain com protocolo
-#  ReAct (Thought → Action → Observation → Final Answer). Modelos com
-#  ≤3B parâmetros não seguem esse protocolo de forma confiável, gerando:
-#    • 'dict' object has no attribute 'lower'
-#    • AgentAction.__init__() missing 2 required positional arguments
-#    • Loops de 27 minutos sem produzir código
+#  O CrewAI v0.11.2 utilizava o AgentExecutor com protocolo ReAct clássico
+#  (Thought → Action → Observation → Final Answer). Modelos de pequeno porte
+#  (≤3B) falhavam sistematicamente nesse protocolo (erros de parser JSON,
+#  loops de 27 minutos sem progresso e context bloat de VRAM).
 #
-#  EVOLUÇÃO DO MODELO (1.5B → 3B) E SUPORTE WOKWI:
-#  ─────────────────────────────────────────────────────────────────────
-#  O modelo inicial (qwen2.5-coder:1.5b) apresentava alucinações severas
-#  em código embarcado para o simulador Wokwi (misturando bibliotecas de
-#  CPython/CircuitPython como Adafruit_DHT, board, wokwi_gpio com
-#  MicroPython e gerando diagram.json fora do schema oficial).
-#  A atualização para o qwen2.5-coder:3b combinada com prompts
-#  especializados para MicroPython/Wokwi permite gerar main.py,
-#  diagram.json e ssd1306.py válidos e prontos para simulação.
+#  Com a evolução para o qwen2.5-coder:7b, o modelo possui suporte nativo
+#  robusto a Function Calling e raciocínio multi-passo. No entanto, o sistema
+#  mantém a arquitetura de "Pipeline Direto" deliberadamente:
+#    1. Velocidade de Inferência: 1 passagem focada por agente (~30s total)
+#       contra 8-15 turnos sequenciais do loop ReAct (3-5 minutos).
+#    2. Avaliação Determinística no Mundo Real: validação em Sandbox MicroPython
+#       real (AST, imports, hardware virtualizado, simulação de falha OSError
+#       e telemetria serial), evitando o viés de autoavaliação do modelo.
+#    3. Loop Corretivo por Evidências: o Agente Corretor é acionado somente
+#       se o Sandbox real reprovar o código, recebendo o Traceback físico exato.
 #
 #  Fluxo:
-#    [GP: Escopo] → [Arquiteto: Design] → [Desenvolvedor: Código+Diagrama]
+#    [GP: Escopo] → [Arquiteto: Design] → [Desenvolvedor: Código+Diagrama] → [QA Sandbox Real]
 # =============================================================================
 
 import ast
